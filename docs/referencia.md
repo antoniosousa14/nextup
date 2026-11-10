@@ -87,6 +87,11 @@ Cada chat tem uma ficha com Abrir, Ver grupo e **Dispensar**. Dispensar esconde 
 (ou do «a trabalhar») só até ao turno seguinte. Um «a trabalhar» cuja sessão do CLI a app já largou (um
 `/clear` a meio do turno) sai sozinho.
 
+Um chat que acabou o turno mas deixou **subagentes ou workflows a correr em fundo** continua «a trabalhar»
+(com a nota «a aguardar N tarefas em fundo») e só passa a «à espera» quando o modelo acordar com o resultado e
+voltar a parar. Um script ou build em fundo conta durante 10 min; passado isso assume-se um servidor e o chat volta a «à espera».
+Monitores em fundo não contam: podem correr para sempre com o chat à tua espera.
+
 Chats **arquivados** na app nunca contam: nem na fila, nem nos projetos, nem na pílula (a pílula dispensa-os
 sozinha).
 

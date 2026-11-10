@@ -8,6 +8,8 @@ import type { Pedido, Resultado } from '../src/carteiro'
 import { lerClassificacao, montarPrompt, MODELO, SISTEMA } from '../src/classificar'
 import { diaLocal, juntarAoDia, registoDoTurno } from '../src/consumo'
 import type { UsoDoTurno } from '../src/consumo'
+import { contarAgentes, contarShells, contarTarefas, fundoDoFim, textoDoFundo, VALIDADE_STOP_MS } from '../src/fundo'
+import type { StopVisto, TarefaEmFundo } from '../src/fundo'
 import { barraGlobal, trabalhoGlobal } from '../src/global'
 import { deFicheiroDaApp, lerFicheiroDoChat, procurarLigacao } from '../src/ligacao'
 import { limparPedido } from '../src/pedido'
@@ -29,6 +31,13 @@ let ligacaoConhecida: Ligacao | undefined
 let eventos = 0
 let progressoAtual: Progresso = { passos: [], ferramentas: 0 }
 let ultimaEscrita = 0
+// Trabalho em fundo (subagentes, workflows): o motor chama o turn.complete e o classic.Stop do mesmo fim de
+// turno por uma ordem que não controlamos, por isso cada um deixa o que viu e o que chega depois completa o
+// outro (ver fundo.ts e registarStop).
+let inicioDoTurno = 0
+let fimDoTurno = 0
+let ultimoStop: StopVisto | undefined
+let shellsDesde: number | undefined
 
 function rotuloDoProjeto(cwd: string): string {
   const nome = cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd
@@ -125,6 +134,7 @@ async function repetirTrabalho($: EngineInterface, pedido: string, meu: number) 
 
 async function marcarATrabalhar($: EngineInterface, pedido: string, repetida = false) {
   ultimoPedido = pedido
+  if (!repetida) shellsDesde = undefined
   if (!repetida) eventos += 1
   const meu = eventos
   const c = await caminhos($)
@@ -149,12 +159,38 @@ async function marcarATrabalhar($: EngineInterface, pedido: string, repetida = f
   await publicarBarra($, c)
 }
 
+// O turno acabou mas ficou trabalho a correr em fundo: o motor acorda o modelo quando acabar, por isso o chat
+// continua «a trabalhar» (desde o pedido) e não pede nada a ninguém. Sem isto aparecia «à espera» de ti.
+async function manterATrabalhar($: EngineInterface, c: Caminhos, sessao: string, agora: number, fundo: number) {
+  versao += 1
+  const projeto = rotuloDoProjeto(await $.session.cwd())
+  const anterior = await lerItem($, c, sessao)
+  await escreverItem($, c, {
+    ...(anterior ?? { sessao, projeto, titulo: ligacaoConhecida?.titulo || projeto, local: ligacaoConhecida?.local }),
+    estado: 'a-trabalhar',
+    desde: anterior?.estado === 'a-trabalhar' ? anterior.desde : agora,
+    progresso: { ...progressoAtual, ultima: textoDoFundo(fundo) },
+  })
+  await publicarBarra($, c)
+}
+
+async function agentesAtivos($: EngineInterface): Promise<number> {
+  try {
+    return contarAgentes(await $.agent.list())
+  } catch {
+    return 0
+  }
+}
+
 async function marcarAEspera($: EngineInterface, resposta: string) {
   eventos += 1
   const c = await caminhos($)
   const sessao = await $.session.id()
   const agora = await $.clock.now()
   if (!(await confirmarChat($, sessao, agora, true))) return
+  fimDoTurno = agora
+  const fundo = fundoDoFim({ stop: ultimoStop, inicioDoTurno, agora, agentes: await agentesAtivos($), shellsDesde })
+  if (fundo > 0) return manterATrabalhar($, c, sessao, agora, fundo)
   versao += 1
   const minha = versao
   const projeto = rotuloDoProjeto(await $.session.cwd())
@@ -172,6 +208,23 @@ async function marcarAEspera($: EngineInterface, resposta: string) {
   await escreverItem($, c, item)
   await publicarBarra($, c)
   void completar($, c, item, ultimoPedido, resposta, minha)
+}
+
+// O Stop do fim de turno traz o trabalho em fundo que o motor conhece (agentes, workflows, shells...). Se o
+// turn.complete ainda não passou, fica guardado para ele; se já passou e deixou o chat «à espera», desfaz-se isso.
+async function registarStop($: EngineInterface, tarefas: readonly TarefaEmFundo[] | undefined) {
+  const agora = await $.clock.now()
+  const shells = contarShells(tarefas)
+  if (shells === 0) shellsDesde = undefined
+  else shellsDesde ??= agora
+  ultimoStop = { em: agora, tarefas: contarTarefas(tarefas), shells }
+  const n = fundoDoFim({ stop: ultimoStop, inicioDoTurno, agora, agentes: 0, shellsDesde })
+  if (n === 0 || inicioDoTurno === 0 || fimDoTurno < inicioDoTurno) return
+  const c = await caminhos($)
+  const sessao = await $.session.id()
+  const atual = await lerItem($, c, sessao)
+  if (!atual || atual.estado !== 'a-espera' || atual.desde < inicioDoTurno || agora - atual.desde > VALIDADE_STOP_MS) return
+  await manterATrabalhar($, c, sessao, agora, n)
 }
 
 // Todos os chats registam o consumo (os limites são da conta), também o orquestrador e as
@@ -311,6 +364,20 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     await marcarATrabalhar($, limparPedido(e.text ?? '')).catch(() => undefined)
+
+    return next(e)
+  })
+
+  // Cada turno do chat (também o que o trabalho em fundo acorda, que não passa por prompt.submit) marca aqui o
+  // seu começo: o Stop de um turno anterior não vale para o fim deste.
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) inicioDoTurno = await $.clock.now().catch(() => inicioDoTurno)
+
+    return next(e)
+  })
+
+  on('classic.Stop', async ($, e, next) => {
+    if (e.agent_id === undefined) await registarStop($, e.background_tasks).catch(() => undefined)
 
     return next(e)
   })
