@@ -141,6 +141,9 @@ A aba Consumo reconstrói o histórico de tokens a partir das transcrições do 
 - as horas de ponta (`gestor/ponta.json`; não há regra oficial em vigor): mapa de calor e excesso medido com
   as leituras do mod.
 
+As transcrições que o Claude Code apagar (limpeza das antigas) continuam a contar: o gestor guarda o que já
+leu no índice e nunca o remove.
+
 #### Novo chat e paleta
 
 Novo chat (`claude://code/new`, numa pasta à escolha) e a paleta de comandos (Ctrl+K) para procurar chats,

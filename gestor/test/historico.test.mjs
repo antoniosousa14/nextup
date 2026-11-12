@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chaveDoModelo, criarHistorico, estadoVazio, lerNovo, listarTranscricoes, objetoEm, processarLinha, tokensDoUso } from '../lib/historico.mjs'
@@ -112,4 +112,38 @@ test('o histórico guarda o índice e não leva o texto das mensagens', async ()
   const outra = criarHistorico({ base, pasta })
   await outra.atualizar()
   assert.equal(outra.estados()[0].humanos.length, 1)
+})
+
+test('uma transcrição que o Claude Code apagou continua a contar, mesmo depois de reiniciar', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'gestor-proj-'))
+  const pasta = join(base, 'historico')
+  const ficheiro = join(base, 'C--x', `${S}.jsonl`)
+  const conteudo = `${humano(T(9))}\n${assistente('msg_1', T(9), uso(5))}\n${assistente('msg_2', T(10), uso(7))}\n`
+  await mkdir(join(base, 'C--x'), { recursive: true })
+  await writeFile(ficheiro, conteudo)
+  const h = criarHistorico({ base, pasta })
+  await h.atualizar()
+  const antes = JSON.parse(JSON.stringify(h.estados()[0].dias))
+  assert.equal(antes['2026-11-03']['claude-opus-5-5'].respostas, 1)
+  assert.equal(h.estados()[0].apagadoEm, undefined)
+
+  // A limpeza do Claude Code apaga o ficheiro: o estado fica, parado, com a data em que se deu por isso.
+  await rm(ficheiro)
+  await h.atualizar()
+  assert.equal(h.estados().length, 1)
+  assert.deepEqual(h.estados()[0].dias, antes)
+  assert.ok(h.estados()[0].apagadoEm > 0)
+
+  // Reiniciar o gestor: o índice em disco ainda tem o que foi apagado.
+  const outra = criarHistorico({ base, pasta })
+  await outra.atualizar()
+  assert.equal(outra.estados().length, 1)
+  assert.deepEqual(outra.estados()[0].dias, antes)
+  assert.equal(outra.estados()[0].humanos.length, 1)
+
+  // Se o ficheiro voltar, deixa de estar marcado como apagado.
+  await writeFile(ficheiro, conteudo)
+  await outra.atualizar()
+  assert.equal(outra.estados().length, 1)
+  assert.equal(outra.estados()[0].apagadoEm, undefined)
 })

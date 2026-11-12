@@ -7,6 +7,8 @@ import { basename, join, sep } from 'node:path'
 // de tokens e a pasta: nunca o texto. Cada ficheiro lê-se uma vez e depois só o que cresceu
 // (posição em bytes, cache por tamanho e mtime); o estado fica em consumo/historico/.
 // 2: blocos de 10 min (para o horário e as horas de ponta).
+// Atenção: o índice é a única cópia do que o Claude Code já apagou das transcrições. Subir a VERSAO
+// descarta-o (carregar() começa do zero): antes de a subir, migrar os estados com `apagadoEm`.
 export const VERSAO = 2
 // Os blocos de tempo guardam os tokens por modelo em [entrada, saída, cache 5 min, cache 1 h, leitura].
 export const BLOCO_MS = 10 * 60_000
@@ -232,8 +234,19 @@ export function criarHistorico({ base, pasta }) {
       }
       progresso.lidos++
     }
+    // O Claude Code apaga as transcrições antigas (limpeza periódica). O que elas gastaram continua a
+    // contar: o estado fica no índice, parado, marcado com `apagadoEm`; se o ficheiro voltar, desmarca-se.
+    // Nunca se removem estados (era isto que fazia o custo total descer quando o Claude limpava).
     const existem = new Set(lista.map(f => f.caminho))
-    for (const caminho of [...estados.keys()]) if (!existem.has(caminho)) { estados.delete(caminho); mudou = true }
+    const agora = Date.now()
+    for (const [caminho, e] of estados) {
+      if (existem.has(caminho)) {
+        if (e.apagadoEm) { delete e.apagadoEm; mudou = true }
+      } else if (!e.apagadoEm) {
+        e.apagadoEm = agora
+        mudou = true
+      }
+    }
     if (mudou) await gravar()
     progresso.acabouEm = Date.now()
 

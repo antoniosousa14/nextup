@@ -9,7 +9,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>NextUp</AssemblyName>
     <RootNamespace>NextUp</RootNamespace>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <Product>NextUp</Product>
     <Description>NextUp: pílula, gestor de chats e tecla de menu</Description>
     <ApplicationIcon>nextup.ico</ApplicationIcon>
