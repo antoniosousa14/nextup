@@ -13,6 +13,10 @@ export function pastas(env = process.env) {
     itens: join(raiz, 'itens'),
     // A situação de cada chat (o que ficou feito, o que falta), escrita pelo mod; não expira.
     situacao: join(raiz, 'situacao'),
+    // Lembretes do que a pessoa deixou para depois (o mod escreve, o gestor dá por feito ou adia).
+    lembretes: join(raiz, 'lembretes'),
+    // O ponto de situação de cada projeto: pedidos do gestor e respostas da IA (pelo mod).
+    projetosIA: join(raiz, 'projetos-ia'),
     // As marcas do gestor nos projetos (dispensar, sem importância, linhas escondidas).
     projetosMarcas: join(raiz, 'projetos-marcas.json'),
     barra: join(raiz, 'barra.json'),

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.1.2" src="https://img.shields.io/badge/release-1.1.2-ff7a1a">
+  <img alt="Version 1.2.0" src="https://img.shields.io/badge/release-1.2.0-ff7a1a">
   <img alt="Windows 11" src="https://img.shields.io/badge/Windows-11-0078d4">
   <img alt=".NET 9" src="https://img.shields.io/badge/.NET-9-512bd4">
   <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933">
@@ -41,6 +41,10 @@ NextUp answers three questions without opening a single chat:
 | | |
 |---|---|
 | **AI-ranked queue** | At the end of each turn, a small model reads the request and the reply and classifies the chat: importance, type (approval, decision, review or information), effort and whether it unblocks the chat. It also writes a card with what you asked, what was done and what needs you. The queue is ordered by this, not by arrival time. |
+| **Your status, by the AI** | At the top of the dashboard, a few plain sentences about everything: what is waiting for you, what finished, what is running on its own, forgotten projects and reminders, and what to start with. |
+| **Live summary while it works** | While a chat works, the AI writes in plain language an explanatory title (you stop needing to remember chat names), what it is doing right now and what it will need from you. A chat that stops mid-turn to ask you something or wait for a permission moves to the top of the waiting list at once. |
+| **Finished** | A chat that ended its turn without needing you goes to **Terminou** (finished) instead of the waiting list, with what it finished and what is still left of the whole job. |
+| **Reminders** | Say "I'll do it later" or "remind me" and the chat leaves the waiting list; a few days later it comes back explained simply, with **Já está feito** (done), **Amanhã** (tomorrow) or **Daqui a 3 dias** (in 3 days). |
 | **Pill** | A discreet pill in the corner of the screen: how many chats are waiting and how many are working. Hover over it to open a board with the queue and the progress of each job. It never steals focus from Claude. |
 | **Chat manager** | A window of its own with the **Painel** (dashboard: waiting for you, working, recent), the **Projetos** (projects), the **Consumo** (usage) tab and the tree of your Claude groups. |
 | **Menu key** | The keyboard's context-menu key (`VK_APPS`): one tap opens and closes the manager; holding it for about 1 s shows or hides the pill. No mouse, no hunting for windows. |
@@ -48,10 +52,12 @@ NextUp answers three questions without opening a single chat:
 
 ### Projects: so nothing gets forgotten
 
-When you open a folder, the manager shows one tile per project, text only: what is **done**, what is **left**
-(by priority) and the **pace**: active today, cooling down, stopped, or **forgotten** (stopped for 7 days or
-more and with things still to do). Filters, sorting and search sit on top; the detail opens only when you
-click a tile. The **×** dismisses a project until there is news in it.
+When you open a folder, the manager shows one tile per project with its **status written by the AI** in a few
+plain sentences: what the project is, what is already solved, where it stopped, **your turn** and **next**. It
+is rewritten within about 20 seconds of any change, even with the window closed. The tile also shows the
+**pace**: active today, cooling down, stopped, or **forgotten** (stopped for 7 days or more and with things
+still to do). Filters, sorting and search sit on top; the detail (with the lists of what is done and left)
+opens only when you click a tile. The **×** dismisses a project until there is news in it.
 
 ### Usage: how much you are really using
 
@@ -66,8 +72,10 @@ pace, and peak hours.
 
 ### Dismiss without guilt
 
-**Dispensar** (dismiss) hides a chat until its next turn; chats archived in the app never count. The queue
-shows only what needs you.
+**Dispensar** (dismiss) hides a chat until its next turn; chats archived in the app or cleared with `/clear`
+never count. When the AI thinks a chat needs you and it does not, **Já está feito** (already done) takes it out
+of the queue and counts it as done by you in its project, so the project status is rewritten. The queue shows
+only what needs you.
 
 ## Screenshots
 
@@ -155,11 +163,11 @@ flowchart LR
 
 ## Installation
 
-1. **Download** `NextUp-1.1.2-win-x64.zip` from the [Releases](../../releases) page and extract it to a folder
+1. **Download** `NextUp-1.2.0-win-x64.zip` from the [Releases](../../releases) page and extract it to a folder
    that will stay put, for example `C:\NextUp`. The mod is loaded from that folder, so do not delete or move it
    afterwards.
    > `NextUp.exe` is not signed: Windows may warn that it does not recognise it. Before extracting, unblock the
-   > zip (`Unblock-File .\NextUp-1.1.2-win-x64.zip`) or, in the warning, choose *More info → Run anyway*.
+   > zip (`Unblock-File .\NextUp-1.2.0-win-x64.zip`) or, in the warning, choose *More info → Run anyway*.
 
 2. **Connect the mod to Claude Code.** In `~/.claude/settings.json` (make a copy first), add to the `env` block:
 
@@ -223,16 +231,17 @@ Windows start-up shortcut. Chats that were already open keep the old mod until y
 - **Network.** The manager asks the ECB (`ecb.europa.eu`) for the exchange rate to convert the cost to euros,
   and the manager page loads its typefaces from Fontshare and Google Fonts. These are read-only requests:
   they carry no data from your chats.
-- **The classification uses your account:** every turn spends a small part of your limit on a small Claude
-  model (Haiku).
+- **The classification uses your account:** every turn, every ~30 s of a working chat and every change in a
+  project spend a small part of your limit on a small Claude model (Haiku).
 
 ## Known limitations
 
 - Windows 11 only.
 - There is no button to send messages to chats from the manager: Claude's auto mode refuses sends that come
   from a mod. To message a chat, ask the orchestrator.
-- The AI's **done** and **left** lists only reach a chat on the turn after the mod loads; until then the
-  manager uses the task list and the app's summary.
+- The AI's summaries (title, what it is doing, finished, reminders) only reach a chat on the turn after the mod
+  loads; until then the manager uses the task list and the app's summary.
+- Project statuses are written by any open chat's mod: with no Claude Code chat open, they wait.
 - Chats opened before a mod update keep the old mod until they finish a turn.
 - A chat closed mid-turn can keep showing as "working" (for up to 3 h); **Dispensar** removes it.
 - Peak hours have no official rule in force: they are an estimate from your own readings.
@@ -280,4 +289,4 @@ and what not to put in the sample data). For a bug or an idea, open an issue. Fo
 [MIT](LICENSE) © 2026 António Sousa. `NextUp.exe` ships with the *Microsoft Edge WebView2 SDK*
 (`Microsoft.Web.WebView2`), which has its own license.
 
-Version **1.1.2**.
+Version **1.2.0**.

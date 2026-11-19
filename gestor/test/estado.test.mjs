@@ -49,8 +49,8 @@ test('espera vem do barra.json, enriquecida com a sessão (título, projeto, pas
   assert.equal(grupo, 'sem-grupo')
   assert.equal(caminho, 'Sem grupo')
   assert.deepEqual(resto, {
-    numero: 1, sessao: 'sa', local: 'local_a', titulo: 'Permissões de pagamentos', projeto: 'FAROL', cwd: 'C:\\x\\FAROL',
-    desde: agora - 3 * M, rotulo: 'Deploy', precisa: 'Aprovar o deploy', pediste: 'Permissões', fez: 'Regras e testes',
+    numero: 1, sessao: 'sa', local: 'local_a', titulo: 'Permissões de pagamentos', nomeChat: 'Permissões de pagamentos', projeto: 'FAROL', cwd: 'C:\\x\\FAROL',
+    desde: agora - 3 * M, rotulo: 'Deploy', precisa: 'Aprovar o deploy', resumo: 'Regras e testes', aLer: false, pedido: '', pediste: 'Permissões', fez: 'Regras e testes',
     importancia: 5, tipo: 'aprovacao', esforco: 'segundos', desbloqueia: true, silenciado: false, urgente: true,
   })
 })
@@ -155,6 +155,48 @@ test('um a trabalhar cuja sessão do CLI a app largou (clear) depois de ele come
   assert.equal(montarEstado({ ...base, sessoes: comClear({ outra: trabalhoB.desde + 2_000 }) }).trabalho.length, 1)
 })
 
+test('um chat à espera onde fizeste /clear depois do turno sai da espera (também se for o do foco)', () => {
+  const comClear = clisSaidos => sessoes.map(s => (s.local === 'local_a' ? { ...s, clisSaidos } : s))
+  const limpo = montarEstado({ ...base, sessoes: comClear({ sa: agora - 3 * M + 60_000 }) })
+  assert.deepEqual(limpo.espera, [])
+  assert.equal(limpo.recentes.find(c => c.local === 'local_a').espera, false)
+  // O chat do foco (fora do barra.json) também não volta.
+  const semBarra = { ...barra, modelo: { ...barra.modelo, chips: [] } }
+  assert.deepEqual(montarEstado({ ...base, barra: semBarra, foco: 'sa', sessoes: comClear({ sa: agora }) }).espera, [])
+  // Uma sessão largada antes do turno (o chat voltou a ela) não conta.
+  assert.equal(montarEstado({ ...base, sessoes: comClear({ sa: agora - 4 * M }) }).espera.length, 1)
+})
+
+test('acabou sem precisar de ti: sai da espera e vai para «Terminou» com o resumo da IA', () => {
+  const fim = { ...classificacao, precisaDeTi: false, resumoFim: 'Ficou pronta a página. Falta o calendário.', falta: [{ texto: 'Calendário', prioridade: 3 }] }
+  const com = itens.map(i => (i.sessao === 'sa' ? { ...i, classificacao: fim } : i))
+  const e = montarEstado({ ...base, itens: com })
+  assert.deepEqual(e.espera, [])
+  assert.equal(e.terminados.length, 1)
+  assert.equal(e.terminados[0].resumo, 'Ficou pronta a página. Falta o calendário.')
+  assert.deepEqual(e.terminados[0].falta, ['Calendário'])
+  assert.equal(e.numeros.terminados, 1)
+  // Itens de antes do campo: «Nada de ti…» no cartão também conta como terminado.
+  const antigo = itens.map(i => (i.sessao === 'sa' ? { ...i, classificacao: { ...classificacao, cartao: { ...classificacao.cartao, precisa: 'Nada de ti agora' } } } : i))
+  assert.equal(montarEstado({ ...base, itens: antigo }).terminados.length, 1)
+  // Arrumado (dispensado), com /clear, ou com mais de 2 dias: sai.
+  assert.equal(montarEstado({ ...base, itens: com, dispensados: { sa: agora - 3 * M } }).terminados.length, 0)
+  assert.equal(montarEstado({ ...base, itens: com, agora: agora + 3 * D }).terminados.length, 0)
+})
+
+test('parado a meio do turno à tua espera passa do «a trabalhar» para a espera, à frente', () => {
+  const b = { ...barra, trabalho: [{ ...trabalhoB, tituloIA: 'Clientes: corrigir o CI', bloqueio: { texto: 'Responder: que versão?', desde: agora - M } }] }
+  const e = montarEstado({ ...base, barra: b })
+  assert.deepEqual(e.trabalho, [])
+  assert.equal(e.espera[0].sessao, 'sb')
+  assert.equal(e.espera[0].precisa, 'Responder: que versão?')
+  assert.equal(e.espera[0].urgente, true)
+  assert.deepEqual(e.espera.map(x => x.numero), [1, 2])
+  assert.equal(e.numeros.espera, 2)
+  assert.equal(e.numeros.trabalho, 0)
+  assert.equal(e.recentes.find(c => c.local === 'local_b').espera, true)
+})
+
 test('dispensar um a trabalhar esconde-o só até ao turno seguinte', () => {
   assert.deepEqual(montarEstado({ ...base, dispensados: { sb: trabalhoB.desde } }).trabalho, [])
   assert.equal(montarEstado({ ...base, dispensados: { sb: trabalhoB.desde - D } }).trabalho.length, 1)
@@ -199,12 +241,29 @@ test('recentes: cada linha traz o resumo, o que precisa (da fila quando está à
   const { grupo, caminho, ...resto } = de('local_a')
   assert.equal(caminho, 'Sem grupo')
   assert.deepEqual(resto, {
-    local: 'local_a', titulo: 'Permissões de pagamentos', projeto: 'FAROL', cwd: 'C:\\x\\FAROL', criadoEm: 0,
-    atividadeEm: agora - 3 * M, mensagemEm: agora - 3 * M, resumo: '', precisa: 'Aprovar o deploy', espera: true, trabalho: false,
+    local: 'local_a', titulo: 'Permissões de pagamentos', nomeChat: 'Permissões de pagamentos', projeto: 'FAROL', cwd: 'C:\\x\\FAROL', criadoEm: 0,
+    atividadeEm: agora - 3 * M, mensagemEm: agora - 3 * M, resumo: 'Regras e testes', precisa: 'Aprovar o deploy', espera: true, trabalho: false,
   })
   assert.equal(de('local_b').trabalho, true)
   assert.equal(de('local_c').precisa, 'Fazer o merge')
   assert.equal(de('local_c').resumo, 'PR aberto')
+})
+
+test('o título da IA passa à frente do nome do chat, que fica em nomeChat', () => {
+  const comTitulo = itens.map(i => (i.sessao === 'sa' ? { ...i, tituloIA: 'Loja online: aprovar o deploy das permissões' } : i))
+  const e = montarEstado({ ...base, itens: comTitulo })
+  assert.equal(e.espera[0].titulo, 'Loja online: aprovar o deploy das permissões')
+  assert.equal(e.espera[0].nomeChat, 'Permissões de pagamentos')
+  const r = e.recentes.find(x => x.local === 'local_a')
+  assert.equal(r.titulo, 'Loja online: aprovar o deploy das permissões')
+  assert.equal(r.nomeChat, 'Permissões de pagamentos')
+})
+
+test('trabalho: usa o título e o «agora» que o mod publica', () => {
+  const t0 = { ...trabalhoB, tituloIA: 'Loja: corrigir o checkout', agora: 'A testar o pagamento' }
+  const [t] = montarEstado({ ...base, barra: { ...barra, trabalho: [t0] } }).trabalho
+  assert.equal(t.titulo, 'Loja: corrigir o checkout')
+  assert.equal(t.agora, 'A testar o pagamento')
 })
 
 test('números: espera, trabalho, urgentes, mais antiga, turnos e chats ativos hoje', () => {
@@ -212,7 +271,7 @@ test('números: espera, trabalho, urgentes, mais antiga, turnos e chats ativos h
   const s = [...sessoes, sessao('local_y', { atividadeEm: meiaNoite - M })]
   const { numeros } = montarEstado({ ...base, sessoes: s, itens: [...itens, ontem] })
   assert.deepEqual(numeros, {
-    espera: 1, urgentes: 1, esperaMaisAntiga: agora - 3 * M, trabalho: 1,
+    espera: 1, adiados: 0, terminados: 0, urgentes: 1, esperaMaisAntiga: agora - 3 * M, trabalho: 1,
     turnosHoje: 2, ativosHoje: 2, chats: 4,
   })
 })

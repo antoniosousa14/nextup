@@ -31,8 +31,17 @@ Mod do Claude Code carregado em todos os chats novos. Em cada fim de turno:
   pediste, o que fez, o que precisa de ti);
 - pede também o que ficou **feito** e o que **falta**, com prioridade, e guarda-o em `situacao\<sessão>.json`
   (não expira, e o feito acumula-se);
+- pede se o chat **precisa de ti** e um resumo simples do que estava a fazer, onde ficou e o que falta; um chat
+  que não precisa de ti vai para «Terminou» em vez de «À tua espera»;
+- se no pedido deixaste algo **para depois** («depois faço», «lembra-me»), guarda um lembrete em
+  `lembretes\<sessão>.json` e tira o chat da espera até lá;
 - publica a fila ordenada em `barra.json`;
 - regista os limites de uso da conta em `consumo\<AAAA-MM-DD>.json`.
+
+Enquanto o chat trabalha, pede à IA, no máximo de 30 em 30 s e sempre que o passo do plano muda, um **título
+explicativo**, o que está a fazer **agora** e o que vai precisar de ti. Se o chat parar a meio do turno à tua
+espera (uma pergunta, aprovar o plano, uma permissão), isso é publicado logo. De 20 em 20 s responde também aos
+pedidos de **ponto de situação dos projetos** que o gestor deixa em `projetos-ia\`.
 
 No chat orquestrador é também o **carteiro**: entrega as mensagens que o gestor deixa em `saida\` (ver
 [Orquestrador](#orquestrador)). O mod já não desenha nada dentro do Claude: a faixa por cima da caixa de
@@ -78,14 +87,21 @@ mod e serve a interface de `gestor/web/`. A porta e o `pid` ficam em `nextup\ges
 
 #### Painel
 
-À tua espera (ordem da IA: importância, espera, desbloqueio), a trabalhar (com a lista de tarefas e a última
-ferramenta), recentes (todos os chats pela última mensagem) e o medidor do consumo (semana, sessão de 5 h,
+No topo, **O teu ponto de situação**: a IA resume tudo (o que te espera, o que acabou, o que anda sozinho, os
+projetos esquecidos e os lembretes) e diz por onde começar; reescreve-o quando alguma coisa muda. Depois,
+À tua espera (cartões por ordem da IA: o que o chat estava a fazer e o que precisa de ti; os chats parados a meio
+do turno à tua espera vêm primeiro, e os lembretes que chegaram à hora logo a seguir aos urgentes), **Terminou**
+(chats que acabaram sem precisar de ti, com o que terminaram e o que falta, durante 2 dias), a trabalhar (o
+título da IA, o que está a fazer agora, o que vai precisar de ti, a lista de tarefas e a última ferramenta),
+recentes (todos os chats pela última mensagem) e o medidor do consumo (semana, sessão de 5 h,
 previsão). Os Recentes têm **filtros** (à espera, a trabalhar, parados), **ordenar** (última mensagem, mais
 antigos, nome, grupo) e **procurar**; o filtro e a ordem ficam guardados no navegador.
 
 Cada chat tem uma ficha com Abrir, Ver grupo e **Dispensar**. Dispensar esconde o chat da fila
-(ou do «a trabalhar») só até ao turno seguinte. Um «a trabalhar» cuja sessão do CLI a app já largou (um
-`/clear` a meio do turno) sai sozinho.
+(ou do «a trabalhar» ou de «Terminou») só até ao turno seguinte. **Já está feito** tira-o da espera e regista no
+projeto que o fizeste (`POST /api/ja-feito`). Um chat onde fizeste `/clear` (a app largou a sessão do CLI
+depois de o item começar) sai sozinho de todo o lado. Os lembretes têm **Feito**, **Amanhã** e **Daqui a 3
+dias** (`POST /api/lembrete`).
 
 Um chat que acabou o turno mas deixou **subagentes ou workflows a correr em fundo** continua «a trabalhar»
 (com a nota «a aguardar N tarefas em fundo») e só passa a «à espera» quando o modelo acordar com o resultado e
@@ -106,8 +122,11 @@ pelas subpastas (o Painel não os mostra). No topo há:
   prioridade mais alta, nome;
 - **procurar**: no nome e no texto do feito e do que falta.
 
-Cada quadrado é só texto, para estares sempre a par e não deixares projetos esquecidos: o que ficou
-**feito**, o que **falta** (por prioridade: a tua vez primeiro, depois a prioridade, e o que ficou parado há
+Cada quadrado mostra o **ponto de situação escrito pela IA** em 2 a 4 frases (o que é, o que está resolvido,
+onde parou), **a tua vez** (com «✓ Já fiz») e **a seguir**. O gestor junta o material de cada projeto e, de 20 em
+20 s mesmo com a janela fechada, deixa um pedido em `projetos-ia\<id>.pedido.json` quando ele muda; o mod de
+um chat aberto responde em `projetos-ia\<id>.json`. Enquanto não há texto da IA, o quadrado mostra as listas: o
+que ficou **feito**, o que **falta** (por prioridade: a tua vez primeiro, depois a prioridade, e o que ficou parado há
 mais tempo sobe um pouco) e o **ritmo**: ativo hoje, a arrefecer, parado, ou esquecido (parado há 7 dias ou
 mais e com coisas por fazer). A árvore põe um ponto ao lado das pastas e grupos com um projeto esquecido.
 
@@ -176,10 +195,12 @@ Tudo em `%USERPROFILE%\.claude\nextup\`:
 | `itens\` | um por chat (expira aos 7 dias) e as dispensas `*.dispensado.json` |
 | `barra.json` | a fila publicada pelo mod (à espera e a trabalhar) |
 | `situacao\<sessão>.json` | o feito e o que falta por chat (não expira) |
+| `lembretes\<sessão>.json` | o que deixaste para depois e quando volta |
+| `projetos-ia\` | os pedidos de ponto de situação (`*.pedido.json`) e as respostas da IA |
 | `consumo\` | os limites de uso por dia; `consumo\historico\` é o índice das transcrições |
 | `consumo-config.json` | a subscrição, para a poupança |
 | `organizacao.json` | as pastas do gestor |
-| `projetos-marcas.json` | as marcas dos projetos |
+| `projetos-marcas.json` | as marcas dos projetos (também o que marcaste como já feito) |
 | `saida\` | as mensagens à espera do carteiro |
 | `orquestrador.json` | o id do chat orquestrador |
 | `gestor.json` | a porta e o `pid` do servidor |
@@ -201,8 +222,10 @@ Só em `127.0.0.1`. Os `POST` exigem um `Origin` local.
 | `GET /api/historico` | o histórico de consumo |
 | `POST /api/abrir` | abre um chat na app do Claude |
 | `POST /api/organizacao` | pastas e ordem do gestor |
-| `POST /api/projeto` | marcas dos projetos (dispensar, sem importância, esconder linhas) |
-| `POST /api/dispensar` | dispensa um chat à espera ou a trabalhar até ao turno seguinte |
+| `POST /api/projeto` | marcas dos projetos (dispensar, sem importância, esconder linhas, já feito) |
+| `POST /api/dispensar` | dispensa um chat à espera, terminado ou a trabalhar até ao turno seguinte |
+| `POST /api/ja-feito` | tira um chat da espera e regista no projeto que já está feito |
+| `POST /api/lembrete` | dá um lembrete por feito ou adia-o |
 | `POST /api/novo-chat` | abre um chat novo |
 | `POST /api/mensagens/preparar` e `/enviar` | mensagens a chats |
 | `POST /api/consumo/config` e `/taxa-bce` | subscrição e taxa de câmbio |

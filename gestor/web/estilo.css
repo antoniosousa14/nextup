@@ -609,3 +609,93 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 .ctrl-busca{width:170px}
 .ctrl-busca::placeholder{color:var(--faint)}
 #recentes-ctrl .ctrl{margin:0 0 6px}
+
+/* A trabalhar: o título e o «agora» em grande, o que precisa de ti logo a seguir; o caminho, o nome do chat,
+   o plano e a ferramenta em pequeno, em baixo. */
+.trab{gap:10px;padding:18px 0}
+.trab .tr-titulo{font:600 17px/1.3 var(--sans);letter-spacing:-.01em;color:var(--ink)}
+.trab .rot-tr{display:block;font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
+.trab .tr-agora .txt{display:block;font:500 16px/1.45 var(--sans);color:var(--ink)}
+.trab .tr-precisa .txt{display:block;font:500 15px/1.45 var(--sans);color:var(--ink);padding-left:10px;box-shadow:inset 2px 0 0 var(--sinal)}
+.trab .tr-precisa .rot-tr{color:var(--sinal)}
+.trab .tr-precisa.nada .txt{font-weight:400;font-size:13px;color:var(--dim);box-shadow:none;padding-left:0}
+.trab .tr-precisa.nada .rot-tr{color:var(--faint)}
+.trab .tr-precisa.ja-ti .txt{color:var(--sinal)}
+.trab .tr-precisa .q{margin-left:4px;font:11px var(--mono);color:var(--dim)}
+.trab.urg{box-shadow:inset 3px 0 0 var(--sinal);padding-left:14px}
+.trab .tr-meta{display:grid;gap:5px;margin-top:2px;opacity:.75}
+.trab .tr-meta .s{color:var(--faint);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trab .tr-meta .seg span{font-size:12px}
+.trab .tr-meta .acao{font-size:10.5px}
+
+/* Projetos: o ponto de situação escrito pela IA, em texto corrido */
+.pj-ia{display:grid;gap:9px}
+.pj-ia p{margin:0;line-height:1.5;overflow-wrap:anywhere}
+.pj-ponto{color:var(--ink)}
+.pj-ia.curto .pj-ponto{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.pj-tua{color:var(--ink);padding-left:10px;box-shadow:inset 2px 0 0 var(--sinal)}
+.pj-tua b{color:var(--sinal);font-weight:500;margin-right:4px}
+.pj-seguir{color:var(--dim)}
+.pj-seguir b{font-weight:500;margin-right:4px}
+.pj-ia-nota{display:inline-block;margin:0 0 0 8px;color:var(--faint);font-size:12px}
+p.pj-ia-nota{margin:0}
+/* À tua espera: lembretes do que deixaste para depois */
+.lin.lemb .pos{color:var(--sinal)}
+.lin.lemb .t::before{content:"↻ ";color:var(--sinal)}
+
+/* Terminou: acabou sem precisar de ti */
+.trab.fim .tr-agora .txt{font-weight:400;color:var(--ink)}
+.trab.fim .l1 .pj-x{margin-left:8px}
+.trab.fim .tr-titulo{color:var(--ink)}
+
+/* Hierarquia: secção > cartão > pormenor. Os títulos das secções são o maior texto da página, com o número
+   ao lado; «À tua espera» fica laranja quando tem alguma coisa. */
+.sec{margin-top:48px}
+.sec-cab{align-items:baseline;gap:12px;margin-bottom:14px}
+.sec-cab h2{font:650 23px/1.2 var(--sans);letter-spacing:-.025em;color:var(--ink)}
+.sec-cab .conta{font:500 15px var(--mono);color:var(--dim)}
+#sec-espera.tem h2,#sec-espera.tem .conta{color:var(--sinal)}
+.lin .t{font-size:15px}
+.trab .tr-titulo{font-size:16px}
+.trab .tr-agora .txt{font-size:15px}
+.trab .tr-precisa .txt{font-size:14.5px}
+.trab.fim .tr-agora .txt{font-size:15px}
+
+/* À tua espera em cartões: o «precisa de ti» é o mais visível depois do título */
+.trab.esp .l1{gap:12px}
+.trab.esp .pos{font:500 14px var(--mono);color:var(--sinal);flex:none}
+.trab.esp .l1 .imp{flex:none;margin-left:auto}
+.trab.esp .l1 .imp + .q{margin-left:12px}
+.trab.esp .tr-precisa .txt{font-size:15.5px}
+.trab.esp .tr-agora .txt{font-weight:400;font-size:15px;color:var(--ink)}
+.trab.esp.lemb .pos{color:var(--sinal)}
+
+/* O diálogo e as secções do projeto nunca alargam além da janela: textos compridos (o estado de um chat,
+   o ponto de situação) cortam ou quebram em vez de esticar a coluna da grelha. */
+.dialogo,.pjd-sec,.pj-ia{grid-template-columns:minmax(0,1fr)}
+.dialogo>*,.pjd-sec>*{min-width:0}
+
+/* «Já está feito» */
+.esp-acoes{display:flex;gap:8px;margin-top:2px}
+.btn.ja-feito{font-size:12.5px;padding:5px 12px}
+.btn.ja-feito.pequeno{font-size:11.5px;padding:2px 9px;margin-left:8px;vertical-align:1px}
+
+/* Detalhe do projeto: o feito e o que falta em texto da IA; as listas num «Ver tudo em lista» */
+.pj-prosa{margin:0;line-height:1.55;color:var(--ink);overflow-wrap:anywhere}
+.pjd-lista{display:grid;gap:12px;border-top:1px solid var(--line);padding-top:10px}
+.pjd-lista>summary{cursor:pointer;color:var(--dim);font-size:13px;list-style:none}
+.pjd-lista>summary::-webkit-details-marker{display:none}
+.pjd-lista>summary::before{content:"▸ ";color:var(--faint)}
+.pjd-lista[open]>summary::before{content:"▾ "}
+.pjd-lista>summary .nota{color:var(--faint);font-size:12px;margin-left:6px}
+.pjd-l{grid-template-columns:auto minmax(0,1fr) auto auto auto}
+.pjd-l .bts{display:flex;gap:2px}
+.pjd-l .x.ok{color:var(--frio)}
+
+/* O teu ponto de situação (resumo do dia pela IA) */
+.sec.dia{margin-top:36px;padding:20px 22px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.sec.dia .sec-cab{margin-bottom:10px}
+.sec.dia h2{font-size:19px}
+.dia-texto{margin:0;font:400 16px/1.6 var(--sans);color:var(--ink);max-width:78ch}
+.dia-primeiro{margin:12px 0 0;padding-left:12px;box-shadow:inset 3px 0 0 var(--sinal);font:500 15.5px/1.5 var(--sans);color:var(--ink)}
+.dia-primeiro b{color:var(--sinal);font-weight:600;margin-right:6px}

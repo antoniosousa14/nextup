@@ -1,7 +1,10 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Item, Progresso } from '../types'
-import { caminhos, escreverFoco, escreverItem, escreverSituacao, garantirPastas, lerItem, lerSituacao, lerTudo } from '../src/armazem'
+import type { Bloqueio, Item, Lembrete, Progresso } from '../types'
+import { caminhos, dispensar, escreverFoco, escreverItem, escreverSituacao, garantirPastas, lerItem, lerJson, lerSituacao, lerTudo } from '../src/armazem'
+import { lembreteDoTurno } from '../src/lembrete'
+import { idsPorGerar, INTERVALO_PROJETOS_MS, lerPedidoProjeto, lerPontoProjeto, SISTEMA_DIA, SISTEMA_PROJETO } from '../src/projetoIA'
+import type { PedidoProjeto, PontoProjeto } from '../src/projetoIA'
 import type { Caminhos } from '../src/armazem'
 import { enderecos, EXPIRA_MS, INTERVALO_MS, lerPedido, porTratar, resultadoDoEnvio, todosFalharam } from '../src/carteiro'
 import type { Pedido, Resultado } from '../src/carteiro'
@@ -15,7 +18,21 @@ import { deFicheiroDaApp, lerFicheiroDoChat, procurarLigacao } from '../src/liga
 import { limparPedido } from '../src/pedido'
 import { juntarSituacao } from '../src/situacao'
 import type { Ligacao } from '../src/ligacao'
-import { aplicarPlano, contaComoAcao, descreverFerramenta, FERRAMENTA_PLANO } from '../src/progresso'
+import { aplicarPlano, contaComoAcao, descreverFerramenta, FERRAMENTA_PLANO, resumoDosPassos } from '../src/progresso'
+import {
+  bloqueioDaFerramenta,
+  bloqueioDePermissao,
+  descreverAcao,
+  FERRAMENTAS_QUE_PERGUNTAM,
+  juntarAcao,
+  lerResumo,
+  montarPromptResumo,
+  pedidosRecentes,
+  resumoDevido,
+  SISTEMA_RESUMO,
+  ultimoTextoDoChat,
+} from '../src/resumo'
+import type { UltimoResumo } from '../src/resumo'
 
 let ultimoPedido = ''
 let versao = 0
@@ -38,6 +55,11 @@ let inicioDoTurno = 0
 let fimDoTurno = 0
 let ultimoStop: StopVisto | undefined
 let shellsDesde: number | undefined
+// O resumo da IA enquanto o chat trabalha (src/resumo.ts): as últimas ações descritas, quando foi o último
+// e se há um a correr. Recomeça em cada pedido.
+let acoesRecentes: string[] = []
+let ultimoResumo: UltimoResumo | undefined
+let resumindo = false
 
 function rotuloDoProjeto(cwd: string): string {
   const nome = cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd
@@ -86,7 +108,7 @@ async function classificar($: EngineInterface, projeto: string, pedido: string, 
       model: MODELO,
       system: SISTEMA,
       prompt: montarPrompt(projeto, pedido, resposta),
-      maxTokens: 700,
+      maxTokens: 1100,
     })
     const classificacao = r.isAnswered ? lerClassificacao(r.text) : undefined
     if (classificacao) return classificacao
@@ -125,7 +147,24 @@ async function completar($: EngineInterface, c: Caminhos, item: Item, pedido: st
   }
   await escreverItem($, c, completo)
   await guardarSituacao($, c, completo, classificacao)
+  await guardarLembrete($, c, completo, classificacao)
   await publicarBarra($, c)
+}
+
+// «Depois faço», «lembra-me»: o chat sai já da espera (dispensado) e o lembrete volta, explicado em
+// linguagem simples, daqui a uns dias (o gestor mostra-o na espera a partir de `quando`).
+async function guardarLembrete($: EngineInterface, c: Caminhos, item: Item, classificacao: Item['classificacao']) {
+  try {
+    const ficheiro = `${c.lembretes}/${item.sessao}.json`
+    const anterior = await lerJson<Lembrete>($, ficheiro)
+    const lembrete = lembreteDoTurno(anterior, item, classificacao, await $.clock.now())
+    if (!lembrete) return
+    await garantirPastas($, c)
+    await $.fs.write(ficheiro, JSON.stringify(lembrete))
+    if (!lembrete.resolvidoEm) await dispensar($, c, item.sessao, item.desde)
+  } catch {
+    // sem lembrete deste turno: o chat fica na espera como sempre
+  }
 }
 
 async function repetirTrabalho($: EngineInterface, pedido: string, meu: number) {
@@ -134,8 +173,12 @@ async function repetirTrabalho($: EngineInterface, pedido: string, meu: number) 
 
 async function marcarATrabalhar($: EngineInterface, pedido: string, repetida = false) {
   ultimoPedido = pedido
-  if (!repetida) shellsDesde = undefined
-  if (!repetida) eventos += 1
+  if (!repetida) {
+    shellsDesde = undefined
+    eventos += 1
+    acoesRecentes = []
+    ultimoResumo = undefined
+  }
   const meu = eventos
   const c = await caminhos($)
   const sessao = await $.session.id()
@@ -157,6 +200,7 @@ async function marcarATrabalhar($: EngineInterface, pedido: string, repetida = f
   })
   await escreverFoco($, c, { sessao, em: agora })
   await publicarBarra($, c)
+  void talvezResumir($)
 }
 
 // O turno acabou mas ficou trabalho a correr em fundo: o motor acorda o modelo quando acabar, por isso o chat
@@ -203,7 +247,8 @@ async function marcarAEspera($: EngineInterface, resposta: string) {
     estado: 'a-espera',
     desde: agora,
     pedido: anterior?.pedido,
-    progresso: progressoAtual,
+    progresso: { ...progressoAtual, bloqueio: undefined },
+    tituloIA: progressoAtual.resumo?.titulo ?? anterior?.tituloIA,
   }
   await escreverItem($, c, item)
   await publicarBarra($, c)
@@ -334,21 +379,128 @@ async function registarFerramenta($: EngineInterface, ferramenta: string, entrad
   const plano = ferramenta === FERRAMENTA_PLANO
   if (plano) {
     progressoAtual = { ...progressoAtual, passos: aplicarPlano(progressoAtual.passos, entrada) }
-  } else if (contaComoAcao(ferramenta)) {
+  }
+  // Uma ferramenta que acabou (também a pergunta ou a permissão que parou o chat) tira o bloqueio.
+  const desbloqueou = !plano && progressoAtual.bloqueio !== undefined
+  if (!plano && contaComoAcao(ferramenta)) {
+    acoesRecentes = juntarAcao(acoesRecentes, descreverAcao(ferramenta, entrada))
     progressoAtual = {
       ...progressoAtual,
       ferramentas: progressoAtual.ferramentas + 1,
       ultima: descreverFerramenta(ferramenta, entrada),
+      bloqueio: undefined,
     }
+  } else if (desbloqueou) {
+    progressoAtual = { ...progressoAtual, bloqueio: undefined }
   }
+  void talvezResumir($)
   const agora = await $.clock.now()
-  if (!plano && agora - ultimaEscrita < 5000) return
+  if (!plano && !desbloqueou && agora - ultimaEscrita < 5000) return
   ultimaEscrita = agora
   const c = await caminhos($)
   const atual = await lerItem($, c, await $.session.id())
   if (!atual || atual.estado !== 'a-trabalhar' || meu !== eventos) return
   await escreverItem($, c, { ...atual, progresso: progressoAtual })
   await publicarBarra($, c)
+}
+
+// O chat parou a meio do turno à espera da pessoa (pergunta, plano, permissão): vai já para o painel.
+async function definirBloqueio($: EngineInterface, bloqueio: Bloqueio | undefined) {
+  if (!bloqueio || (!temSuperficie && ehChat !== true)) return
+  progressoAtual = { ...progressoAtual, bloqueio }
+  const c = await caminhos($)
+  const atual = await lerItem($, c, await $.session.id())
+  if (!atual || atual.estado !== 'a-trabalhar') return
+  await escreverItem($, c, { ...atual, progresso: progressoAtual })
+  await publicarBarra($, c)
+}
+
+// Pede à IA o título explicativo, o que o chat está a fazer agora e o que vai precisar da pessoa. Nunca
+// mais do que um de cada vez; um resumo que chega depois de o turno acabar deita-se fora.
+async function talvezResumir($: EngineInterface) {
+  if (resumindo || (!temSuperficie && ehChat !== true)) return
+  const agora = await $.clock.now()
+  const passo = resumoDosPassos(progressoAtual.passos).atual
+  if (!resumoDevido(ultimoResumo, agora, passo, progressoAtual.ferramentas)) return
+  resumindo = true
+  const meu = eventos
+  ultimoResumo = { em: agora, passo, acoes: progressoAtual.ferramentas }
+  try {
+    const c = await caminhos($)
+    const sessao = await $.session.id()
+    const atual = await lerItem($, c, sessao)
+    if (!atual || atual.estado !== 'a-trabalhar') return
+    // O nome do chat fica de fora: a app inventa-o e pode estar errado (o título colava-se a ele).
+    const lidas = (await $.session.messages().catch(() => [])) as unknown
+    const mensagens = Array.isArray(lidas) ? (lidas as { role: string; text: string }[]) : []
+    const r = await $.model.complete({
+      model: MODELO,
+      system: SISTEMA_RESUMO,
+      prompt: montarPromptResumo({
+        projeto: atual.projeto,
+        tituloAnterior: progressoAtual.resumo?.titulo ?? atual.tituloIA,
+        pedidos: pedidosRecentes(mensagens, atual.pedido ?? ultimoPedido),
+        passos: progressoAtual.passos,
+        acoes: acoesRecentes,
+        ultimoTexto: ultimoTextoDoChat(mensagens),
+      }),
+      maxTokens: 300,
+      timeoutMs: 20_000,
+    })
+    const resumo = r.isAnswered ? lerResumo(r.text, await $.clock.now()) : undefined
+    if (!resumo || meu !== eventos) return
+    progressoAtual = { ...progressoAtual, resumo }
+    const depois = await lerItem($, c, sessao)
+    if (!depois || depois.estado !== 'a-trabalhar' || meu !== eventos) return
+    await escreverItem($, c, { ...depois, tituloIA: resumo.titulo, progresso: progressoAtual })
+    await publicarBarra($, c)
+  } catch {
+    // sem resumo desta vez: o painel mostra o passo do plano e a última ferramenta
+  } finally {
+    resumindo = false
+  }
+}
+
+// O ponto de situação dos projetos (src/projetoIA.ts): o gestor deixa os pedidos, qualquer chat aberto os
+// responde. Um de cada vez neste chat; a reserva evita que dois chats gerem o mesmo projeto.
+let aGerarProjetos = false
+
+async function gerarProjetos($: EngineInterface) {
+  if (aGerarProjetos || (!temSuperficie && ehChat !== true)) return
+  aGerarProjetos = true
+  try {
+    const c = await caminhos($)
+    const nomes = (await $.fs.list(c.projetosIA).catch(() => [])).filter(e => e.kind === 'file').map(e => e.name)
+    const pedidos: PedidoProjeto[] = []
+    const feitos = new Map<string, string>()
+    const reservas = new Map<string, number>()
+    for (const nome of nomes) {
+      const caminho = `${c.projetosIA}/${nome}`
+      if (nome.endsWith('.pedido.json')) {
+        const p = lerPedidoProjeto(await $.fs.read(caminho).catch(() => ''))
+        if (p) pedidos.push(p)
+      } else if (nome.endsWith('.a-gerar.json')) {
+        const r = await lerJson<{ id: string; em: number }>($, caminho)
+        if (r?.id) reservas.set(r.id, r.em)
+      } else if (nome.endsWith('.json')) {
+        const r = await lerJson<PontoProjeto>($, caminho)
+        // Uma resposta no formato antigo (sem «feito» e «falta» em texto) gera-se outra vez.
+        if (r?.id && typeof r.feito === 'string') feitos.set(r.id, r.hash)
+      }
+    }
+    const agora = await $.clock.now()
+    for (const pedido of idsPorGerar(pedidos, feitos, reservas, agora)) {
+      await $.fs.write(`${c.projetosIA}/${pedido.id}.a-gerar.json`, JSON.stringify({ id: pedido.id, em: agora }))
+      const sistema = pedido.tipo === 'dia' ? SISTEMA_DIA : SISTEMA_PROJETO
+      const r = await $.model.complete({ model: MODELO, system: sistema, prompt: pedido.entrada, maxTokens: 700, timeoutMs: 30_000 })
+      const ponto = r.isAnswered ? lerPontoProjeto(r.text, pedido, await $.clock.now()) : undefined
+      if (ponto) await $.fs.write(`${c.projetosIA}/${pedido.id}.json`, JSON.stringify(ponto))
+    }
+  } catch {
+    // tenta-se outra vez na próxima ronda
+  } finally {
+    aGerarProjetos = false
+  }
 }
 
 export const register: Register = on => {
@@ -358,6 +510,7 @@ export const register: Register = on => {
     // A pílula e o gestor (bar/, gestor/) leem o barra.json que publicarBarra escreve.
     temSuperficie = e.surface === 'terminal'
     $.clock.every(INTERVALO_MS, () => void correrCarteiro($).catch(() => undefined))
+    $.clock.every(INTERVALO_PROJETOS_MS, () => void gerarProjetos($))
 
     return next(e)
   })
@@ -376,6 +529,15 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // O motor vai pedir à pessoa permissão para uma ferramenta: o chat fica parado até ela responder.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    if (e.agent_id === undefined) {
+      await definirBloqueio($, bloqueioDePermissao(e.tool_name, e.tool_input, await $.clock.now())).catch(() => undefined)
+    }
+
+    return next(e)
+  })
+
   on('classic.Stop', async ($, e, next) => {
     if (e.agent_id === undefined) await registarStop($, e.background_tasks).catch(() => undefined)
 
@@ -383,8 +545,12 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
-    const resultado = await next(e)
     const entrada = e as unknown as Record<string, unknown>
+    const ferramenta = String(e.tool)
+    if (entrada.agentId === undefined && FERRAMENTAS_QUE_PERGUNTAM.has(ferramenta)) {
+      await definirBloqueio($, bloqueioDaFerramenta(ferramenta, entrada, await $.clock.now())).catch(() => undefined)
+    }
+    const resultado = await next(e)
     if (entrada.agentId === undefined) void registarFerramenta($, String(e.tool), entrada).catch(() => undefined)
 
     return resultado

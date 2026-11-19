@@ -91,55 +91,121 @@ const arrastavel = () => ''
 
 // ——— partes do painel ———
 
+// O nome do chat, pequeno, quando o título que se mostra é o da IA (para o achar na barra lateral do Claude).
+const nomeDoChat = x => (x.nomeChat && x.nomeChat !== x.titulo ? `chat «${x.nomeChat}»` : '')
+
 function htmlFaixa(e) {
   const n = e.numeros
+  const adiados = n.adiados ? ` · ${n.adiados} para depois` : ''
   const fig = (rot, num, nota, sinal) =>
     `<div class="fig"><span class="rot">${rot}</span><div class="num${sinal ? ' sinal' : ''}">${dois(num)}</div><small>${nota}</small></div>`
   const notaEspera = n.espera
     ? `${n.urgentes ? `${n.urgentes} urgente${n.urgentes > 1 ? 's' : ''}` : 'nada urgente'} · mais antigo ${idade(e.geradoEm - n.esperaMaisAntiga)}`
     : 'nada à tua espera'
   const t = e.trabalho[0]
-  const notaTrabalho = !t ? 'nenhum chat a trabalhar' : t.total ? `${esc(t.titulo)} no passo ${esc(Math.min(t.feitos + 1, t.total))}/${esc(t.total)}` : esc(t.titulo)
+  const parados = e.trabalho.filter(x => x.bloqueio).length
+  const notaTrabalho = parados ? `${parados} parado${parados > 1 ? 's' : ''} à tua espera agora`
+    : !t ? 'nenhum chat a trabalhar' : esc(t.agora || (t.total ? `${t.titulo} no passo ${Math.min(t.feitos + 1, t.total)}/${t.total}` : t.titulo))
 
   const semana = e.consumo?.semana
   const quarta = semana
     ? `<div class="fig"><span class="rot">Semana usada</span><div class="num${semana.antesDoReset ? ' sinal' : ''}">${Math.round(semana.percent)}<span style="font-size:.5em;color:var(--dim)">%</span></div><small>reset ${diaHora(semana.resetsAt)}</small></div>`
     : fig('Ativos hoje', n.ativosHoje, `de ${n.chats} chats abertos`)
 
-  return fig('À tua espera', n.espera, notaEspera, n.espera > 0)
-    + fig('A trabalhar', n.trabalho, notaTrabalho)
+  return fig('À tua espera', n.espera, notaEspera + adiados, n.espera > 0)
+    + fig('A trabalhar', n.trabalho, notaTrabalho, parados > 0)
     + fig('Turnos hoje', n.turnosHoje, semana ? `${n.ativosHoje} de ${n.chats} chats ativos hoje` : 'chats com turno registado hoje')
     + quarta
 }
 
+// O ponto de situação de tudo, escrito pela IA (pedido «dia»): o que te espera, o que acabou, o que anda
+// sozinho, os projetos esquecidos e os lembretes, e por onde começar.
+function htmlDia(e) {
+  if (!e.dia) return ''
+
+  return `
+    <div class="sec-cab"><h2>O teu ponto de situação</h2><span class="rot">escrito pela IA · há ${idade(e.geradoEm - e.dia.em)}</span></div>
+    <p class="dia-texto">${esc(e.dia.ponto)}</p>
+    ${e.dia.primeiro ? `<p class="dia-primeiro"><b>Começa por</b> ${esc(e.dia.primeiro)}</p>` : ''}`
+}
+
+// «Já está feito»: o que o chat pedia já o fizeste (ou não era preciso). Sai da espera e conta como feito no
+// projeto, para a IA reescrever o ponto de situação. Num lembrete é o «Feito» dele.
+function botaoJaFeito(x) {
+  if (x.lembrete) return `<button class="btn ja-feito" type="button" data-acao="lembrete" data-id="${esc(x.lembrete.id)}" data-tipo="feito">✓ Já está feito</button>`
+
+  return `<button class="btn ja-feito" type="button" data-acao="ja-feito" data-sessao="${esc(x.sessao)}" data-desde="${x.desde}" data-local="${esc(x.local)}" data-texto="${esc(x.precisa)}" title="Já tratei disto, ou não era preciso">✓ Já está feito</button>`
+}
+
+// Cada chat à tua espera, como um cartão, dito pela IA de forma simples: o título; o que estava a ser feito
+// (para te situares); e o que precisa de ti, como uma instrução. Em pequeno, de onde é e o nome do chat.
 function htmlEspera(e) {
   if (!e.espera.length) return '<div class="vazio">Nada à tua espera.</div>'
 
-  return e.espera.map((x, i) => `
-    <div class="lin${x.urgente ? ' urg' : ''}${chave(x) === selecionado ? ' sel' : ''}" style="--i:${i}" role="button" tabindex="0" data-sel="${esc(chave(x))}"${arrastavel(x.local)}>
-      <span class="pos">${dois(x.numero)}</span>
-      <div><div class="t">${esc(x.titulo)}</div><div class="s">${esc([onde(x), x.rotulo].filter(Boolean).join(' · '))}</div></div>
-      <div class="pr" title="${esc(x.precisa)}">${esc(x.precisa || '—')}</div>
-      ${tracosImp(x.importancia)}
-      <span class="q">${[ESFORCO_CURTO[x.esforco], idade(e.geradoEm - x.desde)].filter(Boolean).join(' · ')}</span>
-    </div>`).join('')
+  return e.espera.map((x, i) => {
+    const tipo = x.parado ? 'Parado a meio do trabalho' : x.lembrete ? `Lembrete de há ${idade(e.geradoEm - x.lembrete.criadoEm)}` : ''
+    const precisa = x.precisa
+      ? `<div class="tr-precisa"><span class="rot-tr">${x.parado ? 'Precisa de ti agora' : x.lembrete ? 'Ficou para depois' : 'Precisa de ti'}</span><span class="txt">${esc(x.precisa)}</span></div>`
+      : `${!x.aLer && x.pedido ? `<div class="tr-agora"><span class="rot-tr">Pediste</span><span class="txt">${esc(x.pedido)}</span></div>` : ''}<div class="tr-precisa nada"><span class="txt">${x.aLer ? 'A IA está a ler o que o chat respondeu…' : 'A IA não conseguiu resumir este turno: abre o chat para ver a resposta.'}</span></div>`
+    const resumo = x.resumo && x.resumo !== x.precisa
+      ? `<div class="tr-agora"><span class="rot-tr">O que estava a fazer</span><span class="txt">${esc(x.resumo)}</span></div>` : ''
+    const meta = [tipo, onde(x), nomeDoChat(x)].filter(Boolean).join(' · ')
+
+    return `
+    <div class="trab esp${x.urgente ? ' urg' : ''}${x.lembrete ? ' lemb' : ''}${chave(x) === selecionado ? ' sel' : ''}" style="--i:${i}" role="button" tabindex="0" data-sel="${esc(chave(x))}"${arrastavel(x.local)}>
+      <div class="l1"><span class="pos">${dois(x.numero)}</span><b class="tr-titulo">${esc(x.titulo)}</b>${x.lembrete ? '' : tracosImp(x.importancia)}<span class="q">${idade(e.geradoEm - x.desde)}</span></div>
+      ${resumo}
+      ${precisa}
+      ${x.parado ? '' : `<div class="esp-acoes">${botaoJaFeito(x)}</div>`}
+      ${meta ? `<div class="tr-meta"><div class="s">${esc(meta)}</div></div>` : ''}
+    </div>`
+  }).join('')
 }
 
+// Cada chat a trabalhar: o título que a IA lhe deu, o que precisa de ti (agora, se parou à tua espera a
+// meio do turno; ou mais à frente), o que está a fazer neste momento e o plano. A ferramenta crua fica
+// por baixo, pequena, só para ver que mexe.
 function htmlTrabalho(e) {
   if (!e.trabalho.length) return '<div class="vazio">Nenhum chat a trabalhar.</div>'
 
   return e.trabalho.map((t, i) => {
     const pedido = limparPedido(t.pedido)
     const acao = [t.ultima, `${Number(t.ferramentas) || 0} ferramenta${t.ferramentas === 1 ? '' : 's'}`].filter(Boolean).join(' · ')
+    const sub = [onde(t), nomeDoChat(t)].filter(Boolean).join(' · ')
+    const agora = t.agora || t.atual || (pedido ? `A começar: ${pedido}` : '')
+    const nada = !t.bloqueio && (!t.precisa || /^nada/i.test(t.precisa))
+    const precisa = t.bloqueio
+      ? `<div class="tr-precisa ja-ti"><span class="rot-tr">Precisa de ti agora</span><span class="txt">${esc(t.bloqueio.texto)} <span class="q">há ${idade(e.geradoEm - t.bloqueio.desde)}</span></span></div>`
+      : !nada ? `<div class="tr-precisa"><span class="rot-tr">De ti</span><span class="txt">${esc(t.precisa)}</span></div>` : ''
 
+    // Hierarquia: o título e o que está a fazer agora em grande; o que precisa de ti logo a seguir; o caminho,
+    // o nome do chat, o plano e a ferramenta pequenos, em baixo (são para quem quer o pormenor).
     return `
-    <div class="trab${chave(t) === selecionado ? ' sel' : ''}" style="--i:${i}" role="button" tabindex="0" data-sel="${esc(chave(t))}"${arrastavel(t.local)}>
-      <div class="l1"><b style="font-weight:500">${esc(t.titulo)}</b><span class="s" style="color:var(--faint);font-size:12px">${esc(onde(t))}</span><span class="q">${idade(e.geradoEm - t.desde)}</span></div>
-      ${pedido ? `<div class="ped" title="${esc(pedido)}">${esc(pedido)}</div>` : ''}
-      ${t.total ? `<div class="seg">${segmentos(t.feitos, t.total)}<span>${esc(t.feitos)}/${esc(t.total)}${t.atual ? ` · ${esc(t.atual)}` : ''}</span></div>` : ''}
-      <div class="acao">${esc(acao)}</div>
+    <div class="trab${t.bloqueio ? ' urg' : ''}${chave(t) === selecionado ? ' sel' : ''}" style="--i:${i}" role="button" tabindex="0" data-sel="${esc(chave(t))}"${arrastavel(t.local)}>
+      <div class="l1"><b class="tr-titulo">${esc(t.titulo)}</b><span class="q">${idade(e.geradoEm - t.desde)}</span></div>
+      ${agora ? `<div class="tr-agora"><span class="rot-tr">Agora</span><span class="txt">${esc(agora)}</span></div>` : ''}
+      ${precisa}
+      <div class="tr-meta">
+        ${sub ? `<div class="s">${esc(sub)}</div>` : ''}
+        ${t.total ? `<div class="seg">${segmentos(t.feitos, t.total)}<span>${esc(t.feitos)}/${esc(t.total)}${t.atual ? ` · ${esc(t.atual)}` : ''}</span></div>` : ''}
+        <div class="acao">${esc(acao)}${t.resumoEm ? ` · resumo há ${idade(e.geradoEm - t.resumoEm)}` : ''}</div>
+      </div>
     </div>`
   }).join('')
+}
+
+// Chats que acabaram o turno sem precisar de ti: o que terminaram e o que ainda falta, em texto da IA. Arrumar
+// (×) tira-o daqui até ao próximo turno desse chat.
+function htmlTerminou(e) {
+  const lista = e.terminados ?? []
+  if (!lista.length) return '<div class="vazio">Nada terminado por ver.</div>'
+
+  return lista.map((t, i) => `
+    <div class="trab fim${chave(t) === selecionado ? ' sel' : ''}" style="--i:${i}" role="button" tabindex="0" data-sel="${esc(chave(t))}"${arrastavel(t.local)}>
+      <div class="l1"><b class="tr-titulo">${esc(t.titulo)}</b><span class="q">há ${idade(e.geradoEm - t.desde)}</span><button class="pj-x" type="button" data-acao="arrumar" data-sessao="${esc(t.sessao)}" data-desde="${t.desde}" title="Arrumar: já vi" aria-label="Arrumar ${esc(t.titulo)}">×</button></div>
+      ${t.resumo ? `<div class="tr-agora"><span class="txt">${esc(t.resumo)}</span></div>` : ''}
+      <div class="tr-meta">${[onde(t), nomeDoChat(t)].filter(Boolean).length ? `<div class="s">${esc([onde(t), nomeDoChat(t)].filter(Boolean).join(' · '))}</div>` : ''}</div>
+    </div>`).join('')
 }
 
 // ——— controlos: filtrar, ordenar e procurar ———
@@ -305,6 +371,19 @@ function htmlRitmo(p) {
 // O quadrado do projeto: só texto, sem chats. O que ficou feito e o que falta (por prioridade agora,
 // a tua vez à frente); o × dispensa-o até haver novidades (como na fila) e carregar no quadrado
 // mostra tudo (dialogoProjeto).
+// O ponto de situação da IA (texto corrido): onde ficou, a tua vez e o que vem a seguir. Sem ele (a IA
+// ainda não escreveu) ficam as listas de antes.
+function htmlPontoIA(p, { curto = false } = {}) {
+  if (!p.ia) return ''
+  const nota = p.ia.desatualizado ? '<span class="pj-ia-nota">a atualizar…</span>' : ''
+
+  return `<div class="pj-ia${curto ? ' curto' : ''}">
+      <p class="pj-ponto">${esc(p.ia.ponto)}${nota}</p>
+      ${p.ia.tuaVez ? `<p class="pj-tua"><b>A tua vez</b> ${esc(p.ia.tuaVez)} <button class="btn ja-feito pequeno" type="button" data-acao="projeto-ja-feito" data-id="${esc(p.id)}" title="Já fiz isto: a IA atualiza o ponto de situação">✓ Já fiz</button></p>` : ''}
+      ${p.ia.aSeguir ? `<p class="pj-seguir"><b>A seguir</b> ${esc(p.ia.aSeguir)}</p>` : ''}
+    </div>`
+}
+
 function htmlProjeto(e, p) {
   const feito = p.feito.slice(0, MAX_FEITO_CARTAO)
   const falta = p.porFazer.slice(0, MAX_FALTA_CARTAO)
@@ -315,8 +394,9 @@ function htmlProjeto(e, p) {
     <article class="pj${p.tuaVez ? ' esp' : ''}${p.esquecido ? ' esq' : ''}${p.semImportancia || p.dispensado ? ' sem' : ''}" role="button" tabindex="0" data-acao="projeto" data-id="${esc(p.id)}" title="Ver mais sobre ${esc(p.nome)}">
       <div class="pj-cab"><span class="rot">${esc(p.caminho)}</span>${chipRitmo(p)}${p.dispensado ? '' : `<button class="pj-x" type="button" data-acao="projeto-dispensar" data-id="${esc(p.id)}" data-desde="${p.ultimaEm}" title="Dispensar até haver novidades" aria-label="Dispensar ${esc(p.nome)} até haver novidades">×</button>`}</div>
       <h3 class="pj-nome">${esc(p.nome)}</h3>
+      ${p.ia ? htmlPontoIA(p, { curto: true }) : `<p class="pj-ia-nota">A IA está a escrever o ponto de situação…</p>
       <div class="pj-sec feito"><div class="rot">Feito</div>${lista(feito.map(f => `<li>${esc(f.texto)}</li>`), 'Nada registado ainda.')}</div>
-      <div class="pj-sec"><div class="rot">Falta</div>${lista(falta.map(i => `<li${i.tuaVez ? ' class="tua"' : ''}>${esc(i.texto)}</li>`), 'Nada por fazer registado.')}${maisFalta > 0 ? `<p class="pj-resto">e mais ${maisFalta}</p>` : ''}</div>
+      <div class="pj-sec"><div class="rot">Falta</div>${lista(falta.map(i => `<li${i.tuaVez ? ' class="tua"' : ''}>${esc(i.texto)}</li>`), 'Nada por fazer registado.')}${maisFalta > 0 ? `<p class="pj-resto">e mais ${maisFalta}</p>` : ''}</div>`}
     </article>`
 }
 
@@ -334,7 +414,7 @@ function dialogoProjeto(id) {
         <span class="t">${esc(i.texto)}</span>
         <span class="m">${i.tuaVez ? 'tua vez' : i.emCurso ? 'em curso' : ''}</span>
         <button class="c" type="button" data-acao="projeto-chat" data-local="${esc(i.chat.local)}" title="Ver o chat">${esc(i.chat.titulo)}</button>
-        ${esconder(i.texto)}
+        <span class="bts"><button class="x ok" type="button" data-acao="projeto-feito-linha" data-id="${esc(p.id)}" data-texto="${esc(i.texto)}" data-local="${esc(i.chat.local)}" title="Já está feito" aria-label="Já está feito">✓</button>${esconder(i.texto)}</span>
       </div>`).join('')
   const feito = p.feito.map(f => `
       <div class="pjd-l feito">
@@ -356,8 +436,13 @@ function dialogoProjeto(id) {
   abrirDialogo(`
     <div class="pjd-cab"><span class="rot">${esc(p.caminho)}</span>${chipRitmo(p)}${htmlRitmo(p)}</div>
     <h2 id="dialogo-titulo">${esc(p.nome)}</h2>
+    ${htmlPontoIA(p)}
+    ${p.ia?.feito ? `<div class="pjd-sec"><div class="rot">O que já está feito</div><p class="pj-prosa">${esc(p.ia.feito)}</p></div>` : ''}
+    ${p.ia?.falta ? `<div class="pjd-sec"><div class="rot">O que falta</div><p class="pj-prosa">${esc(p.ia.falta)}</p></div>` : ''}
+    ${p.ia?.feito || p.ia?.falta ? `<details class="pjd-lista"><summary>Ver tudo em lista <span class="nota">marca ✓ o que já fizeste, × o que já não vale</span></summary>` : ''}
     <div class="pjd-sec"><div class="rot">Falta <span class="nota">por prioridade agora · a tua vez à frente</span></div>${falta || '<p class="pj-nada">Nada por fazer registado.</p>'}</div>
     <div class="pjd-sec"><div class="rot">Feito recentemente</div>${feito || '<p class="pj-nada">Nada registado ainda.</p>'}</div>
+    ${p.ia?.feito || p.ia?.falta ? '</details>' : ''}
     <div class="pjd-sec"><div class="rot">Chats do grupo · ${p.total}</div>${linhasChats}${p.maisChats ? `<p class="pj-resto">e mais ${p.maisChats} no grupo</p>` : ''}</div>
     ${p.linhasEscondidas ? `<p class="nota-d">${p.linhasEscondidas} linha${p.linhasEscondidas === 1 ? '' : 's'} escondida${p.linhasEscondidas === 1 ? '' : 's'}. <button class="ligacao" type="button" data-acao="projeto-repor-linhas" data-id="${esc(p.id)}">Repor</button></p>` : ''}
     <div class="pjd-acoes">
@@ -576,7 +661,7 @@ function htmlLinhaRec(e, r) {
   return `
     <div class="rec${r.espera ? ' esp' : ''}${r.local === selecionado ? ' sel' : ''}" role="button" tabindex="0" data-sel="${esc(r.local)}"${arrastavel(r.local)}>
       <span class="glifo">${glifo}</span>
-      <div class="c1"><div class="t" title="${esc(r.titulo)}">${esc(r.titulo)}</div><div class="s" title="${esc(pasta(r.cwd))}">${esc(onde(r))}</div></div>
+      <div class="c1"><div class="t" title="${esc(r.titulo)}">${esc(r.titulo)}</div><div class="s" title="${esc(pasta(r.cwd))}">${esc([onde(r), nomeDoChat(r)].filter(Boolean).join(' · '))}</div></div>
       <div class="c2">${precisa ? `<div class="pr" title="${esc(precisa)}">${esc(precisa)}</div>` : ''}${estadoTxt ? `<div class="s" title="${esc(estadoTxt)}">${esc(estadoTxt)}</div>` : ''}${!precisa && !estadoTxt ? '<div class="s">—</div>' : ''}</div>
       <span class="q" title="${esc(quando(r.mensagemEm))}">${idade(e.geradoEm - r.mensagemEm)}</span>
       <button class="btn q abrir" type="button" data-acao="abrir" data-local="${esc(r.local)}" title="Abrir na app">↗</button>
@@ -584,7 +669,7 @@ function htmlLinhaRec(e, r) {
 }
 
 // Onde se procura num chat recente: o título, o grupo, o estado e o que precisa de ti.
-const textoDoRecente = r => [r.titulo, r.caminho, r.projeto, r.resumo, r.precisa].join(' ')
+const textoDoRecente = r => [r.titulo, r.nomeChat, r.caminho, r.projeto, r.resumo, r.precisa].join(' ')
 const recentesFiltrados = e => aplicarControlos('rec', e.recentes, textoDoRecente)
 
 function htmlRecentes(e) {
@@ -645,7 +730,7 @@ function linhaChat(e, local) {
   if (!c) return ''
   const glifo = c.espera ? '<span class="sinal-pt"></span>' : c.trabalho ? '◌' : ''
 
-  return `<button class="it chat${c.local === selecionado ? ' on' : ''}" type="button" data-sel="${esc(c.local)}" title="${esc(c.titulo)}"><span class="glifo">${glifo}</span><span class="nome">${esc(c.titulo)}</span><span class="n">${idade(e.geradoEm - c.mensagemEm)}</span></button>`
+  return `<button class="it chat${c.local === selecionado ? ' on' : ''}" type="button" data-sel="${esc(c.local)}" title="${esc([c.titulo, nomeDoChat(c)].filter(Boolean).join(' — '))}"><span class="glifo">${glifo}</span><span class="nome">${esc(c.titulo)}</span><span class="n">${idade(e.geradoEm - c.mensagemEm)}</span></button>`
 }
 
 const htmlCriar = () => '<div class="it criar"><span class="seta"></span><input class="ed" data-ed="criar" placeholder="Nome da pasta" maxlength="60" aria-label="Nome da nova pasta"></div>'
@@ -766,44 +851,53 @@ function htmlVistaSeccao(e, n) {
 function procurar(e, k) {
   const espera = e.espera.find(x => chave(x) === k)
   const trabalho = e.trabalho.find(x => chave(x) === k)
+  const terminou = (e.terminados ?? []).find(x => chave(x) === k)
   const chat = e.recentes.find(c => c.local === k)
 
-  return espera || trabalho || chat ? { espera, trabalho, chat } : undefined
+  return espera || trabalho || terminou || chat ? { espera, trabalho, terminou, chat } : undefined
 }
 
 function htmlFicha(e, f) {
-  const { espera, trabalho, chat } = f
-  const base = espera ?? trabalho ?? chat
+  const { espera, trabalho, terminou, chat } = f
+  const base = espera ?? trabalho ?? terminou ?? chat
   const agora = e.geradoEm
   const local = base.local || chat?.local || ''
   const cwd = base.cwd || chat?.cwd || ''
 
   let cab
-  if (espera) cab = `<span class="sinal-pt"></span><span class="rot" style="color:var(--sinal)">À tua espera · ${dois(espera.numero)}</span>`
+  if (espera?.lembrete) cab = `<span class="sinal-pt"></span><span class="rot" style="color:var(--sinal)">Lembrete · ${dois(espera.numero)}</span>`
+  else if (espera) cab = `<span class="sinal-pt"></span><span class="rot" style="color:var(--sinal)">À tua espera · ${dois(espera.numero)}</span>`
   else if (trabalho) cab = '<span class="glifo">◌</span><span class="rot">A trabalhar</span>'
+  else if (terminou) cab = `<span class="glifo">✓</span><span class="rot">Terminou há ${idade(agora - terminou.desde)}</span>`
   else cab = `<span class="glifo">↺</span><span class="rot">Última mensagem há ${idade(agora - (chat?.mensagemEm ?? 0))}</span>`
 
-  const precisa = espera?.precisa || (!trabalho && chat?.precisa) || ''
+  const precisa = trabalho?.bloqueio ? `Agora: ${trabalho.bloqueio.texto}` : espera?.precisa || trabalho?.precisa || (!trabalho && chat?.precisa) || ''
   const linhas = []
   const linha = (dt, dd, mono) => linhas.push(`<dt>${dt}</dt><dd${mono ? ' class="mono"' : ''}>${dd}</dd>`)
   if (espera) {
+    if (espera.lembrete) linha('Criado', `há ${idade(agora - espera.lembrete.criadoEm)}`)
     if (espera.pediste) linha('Pediste', esc(espera.pediste))
     if (espera.fez) linha('Fez', esc(espera.fez))
-    linha('Imp.', `${tracosImp(espera.importancia, espera.urgente).replace('class="imp"', 'class="imp" style="vertical-align:-1px"')} <span class="mono" style="color:var(--dim)">${esc(espera.importancia)}/5${espera.tipo ? ` · ${TIPO[espera.tipo] ?? esc(espera.tipo)}` : ''}</span>`)
+    if (!espera.lembrete) linha('Imp.', `${tracosImp(espera.importancia, espera.urgente).replace('class="imp"', 'class="imp" style="vertical-align:-1px"')} <span class="mono" style="color:var(--dim)">${esc(espera.importancia)}/5${espera.tipo ? ` · ${TIPO[espera.tipo] ?? esc(espera.tipo)}` : ''}</span>`)
     if (espera.esforco) linha('Esforço', `${esc(espera.esforco)}${espera.desbloqueia ? ' · desbloqueia o chat' : ''}`)
     linha('Espera', relogio(agora - espera.desde), true)
   }
   if (trabalho) {
     const pedido = limparPedido(trabalho.pedido)
     if (pedido) linha('Pediste', esc(pedido))
+    if (trabalho.agora) linha('Agora', `${esc(trabalho.agora)}${trabalho.resumoEm ? ` <small class="dica">há ${idade(agora - trabalho.resumoEm)}</small>` : ''}`)
     if (trabalho.total) linha('Tarefas', `<span class="seg" style="display:inline-flex">${segmentos(trabalho.feitos, trabalho.total)}</span> <span class="mono" style="color:var(--dim)">${esc(trabalho.feitos)}/${esc(trabalho.total)}</span>`)
     linha('Ferram.', `${esc(trabalho.ferramentas)}${trabalho.ultima ? ` · ${esc(trabalho.ultima)}` : ''}`)
     linha('Há', relogio(agora - trabalho.desde), true)
   }
-  if (!espera && !trabalho) {
+  if (terminou) {
+    if (terminou.resumo) linha('Terminou', esc(terminou.resumo))
+    if (terminou.falta.length) linha('Ainda falta', esc(terminou.falta.join(' · ')))
+  }
+  if (!espera && !trabalho && !terminou) {
     const det = detalheChat.get(local)
     if (det?.pedi) linha('Pediste', esc(det.pedi))
-    const ultimo = det?.respondeu || chat?.resumo
+    const ultimo = chat?.resumo || det?.respondeu
     if (ultimo) linha('Último estado', esc(ultimo))
     if (det?.plano) linha('Tarefas', `<span class="seg" style="display:inline-flex">${segmentos(det.plano.feitos, det.plano.total)}</span> <span class="mono" style="color:var(--dim)">${esc(det.plano.feitos)}/${esc(det.plano.total)}</span>${det.plano.feitos < det.plano.total && det.plano.atual ? ` · ficou em ${esc(det.plano.atual)}` : ''}`)
   }
@@ -828,12 +922,15 @@ function htmlFicha(e, f) {
   return `
     <div class="det-cab">${cab}<span class="esp"></span><button class="btn q" type="button" data-acao="fechar" title="Fechar (Esc)">✕</button></div>
     <div class="det-corpo">
-      <div><span class="rot">${esc(onde(chat ?? base))}</span><h3>${esc(base.titulo)}</h3></div>
+      <div><span class="rot">${esc(onde(chat ?? base))}</span><h3>${esc(base.titulo)}</h3>${nomeDoChat(chat ?? base) ? `<small class="dica">${esc(nomeDoChat(chat ?? base))} na barra lateral</small>` : ''}</div>
       ${precisa ? `<div class="precisa">${esc(precisa)}</div>` : ''}
       <div class="acoes">
         <button class="btn cheio" type="button" data-acao="abrir" data-local="${esc(local)}"${local ? '' : ' disabled'}>Abrir na app</button>
         <button class="btn" type="button" data-ver="${esc(grupo ?? '')}"${grupo ? '' : ' disabled'} title="Ver os chats do mesmo grupo">Ver grupo</button>
-        <button class="btn" type="button" data-acao="dispensar"${espera ? '' : trabalho ? ' title="Esconde este chat de «a trabalhar» até ao próximo turno (para quando fica preso)"' : ' disabled title="Só os chats à tua espera ou a trabalhar se dispensam"'}>Dispensar</button>
+        ${espera && !espera.lembrete && !espera.parado ? botaoJaFeito(espera) : ''}
+        ${espera?.lembrete ? `<button class="btn" type="button" data-acao="lembrete" data-id="${esc(espera.lembrete.id)}" data-tipo="feito" title="Já está tratado">Feito</button>
+        <button class="btn" type="button" data-acao="lembrete" data-id="${esc(espera.lembrete.id)}" data-tipo="adiar" data-dias="1">Amanhã</button>
+        <button class="btn" type="button" data-acao="lembrete" data-id="${esc(espera.lembrete.id)}" data-tipo="adiar" data-dias="3">Daqui a 3 dias</button>` : `<button class="btn" type="button" data-acao="dispensar"${espera || terminou ? '' : trabalho ? ' title="Esconde este chat de «a trabalhar» até ao próximo turno (para quando fica preso)"' : ' disabled title="Só os chats à tua espera ou a trabalhar se dispensam"'}>Dispensar</button>`}
       </div>
       ${linhas.length ? `<dl class="ficha">${linhas.join('')}</dl>` : ''}
       ${passos ? `<div><div class="rot" style="margin-bottom:12px">Tarefas</div><div class="passos">${passos}</div></div>` : ''}
@@ -1003,7 +1100,7 @@ function itensDaPaleta(termo) {
   })).filter(bate)
   const chats = estado.recentes.map(c => ({
     tipo: 'chat', rotulo: c.titulo, sub: [onde(c), c.espera ? 'à tua espera' : c.trabalho ? 'a trabalhar' : `há ${idade(estado.geradoEm - c.mensagemEm)}`].join(' · '),
-    filtro: semAcentos(`${c.titulo} ${c.caminho} ${c.projeto} ${c.resumo}`), sinal: c.espera, local: c.local,
+    filtro: semAcentos(`${c.titulo} ${c.nomeChat ?? ''} ${c.caminho} ${c.projeto} ${c.resumo}`), sinal: c.espera, local: c.local,
     fazer: () => { if (vista.tipo !== 'painel' && !chatsDaSubarvore(acharNo(estado.arvore, vista.id) ?? { chats: [], filhas: [] }).includes(c.local)) vista = { tipo: 'painel' }; selecionar(c.local) },
   })).filter(bate)
 
@@ -1488,6 +1585,10 @@ function desenhar() {
   $('data').textContent = `${DIAS[d.getDay()]} ${dois(d.getDate())} ${MESES[d.getMonth()]} · ${hora(e.geradoEm)}`
   $('n-espera').textContent = dois(e.numeros.espera)
   $('n-trabalho').textContent = dois(e.numeros.trabalho)
+  $('n-terminou').textContent = dois(e.numeros.terminados ?? 0)
+  $('r-espera').textContent = dois(e.numeros.espera)
+  $('r-terminou').textContent = dois(e.numeros.terminados ?? 0)
+  $('sec-espera').classList.toggle('tem', e.numeros.espera > 0)
   $('n-recentes').textContent = dois(e.recentes.length)
   $('r-trabalho').textContent = dois(e.numeros.trabalho)
   $('r-recentes').textContent = rotuloRecentes(e)
@@ -1522,7 +1623,10 @@ function desenhar() {
   else {
     por('faixa', htmlFaixa(e))
     por('linha-consumo', htmlLinhaConsumo(e))
+    $('sec-dia').hidden = !e.dia
+    por('sec-dia', htmlDia(e))
     por('espera', htmlEspera(e))
+    por('terminou', htmlTerminou(e))
     por('trabalho', htmlTrabalho(e))
     if (!(aEscrever && document.activeElement.dataset.buscaNs === 'rec')) por('recentes-ctrl', htmlControlos('rec', e.recentes))
     por('recentes', htmlRecentes(e))
@@ -1653,8 +1757,60 @@ async function agir(botao) {
       avisarNoBotao(botao, botao.classList.contains('abrir') ? '!' : 'Não abriu')
     }
   }
+  if (acao === 'ja-feito') {
+    try {
+      await pedir('/api/ja-feito', { sessao: botao.dataset.sessao, desde: Number(botao.dataset.desde), local: botao.dataset.local || undefined, texto: botao.dataset.texto })
+      if (selecionado === botao.dataset.local) selecionado = null
+      await atualizar()
+      await atualizarProjetos(true)
+    } catch {
+      avisarNoBotao(botao, 'Falhou')
+    }
+    return
+  }
+  if (acao === 'projeto-ja-feito' || acao === 'projeto-feito-linha') {
+    const p = projetos?.projetos.find(x => x.id === id)
+    if (!p) return
+    // «Já fiz» do «A tua vez»: o que a IA te pedia, e as linhas que eram a tua vez.
+    const linhas = acao === 'projeto-feito-linha'
+      ? [{ texto: botao.dataset.texto, chat: { local: botao.dataset.local } }]
+      : [...(p.ia?.tuaVez ? [{ texto: p.ia.tuaVez, chat: { local: p.principal?.local } }] : []), ...p.porFazer.filter(i => i.tuaVez)]
+    try {
+      for (const l of linhas) {
+        // Um chat do projeto à tua espera sai da espera também; o resto fica só como feito no projeto.
+        const esp = estado?.espera.find(x => x.local === l.chat?.local && !x.parado && !x.lembrete)
+        if (esp) await pedir('/api/ja-feito', { sessao: esp.sessao, desde: esp.desde, local: esp.local, texto: l.texto })
+        else await pedir('/api/projeto', { acao: 'feito-linha', grupo: p.id, texto: l.texto, local: l.chat?.local || undefined })
+      }
+      await atualizar()
+      await atualizarProjetos(true)
+      if (dialogoAberto()) dialogoProjeto(p.id)
+    } catch (erro) {
+      avisar(`Não deu: ${erro.message}`)
+    }
+    return
+  }
+  if (acao === 'arrumar') {
+    try {
+      await pedir('/api/dispensar', { sessao: botao.dataset.sessao, desde: Number(botao.dataset.desde) })
+      await atualizar()
+    } catch {
+      avisarNoBotao(botao, 'Falhou')
+    }
+    return
+  }
+  if (acao === 'lembrete') {
+    try {
+      await pedir('/api/lembrete', { id: botao.dataset.id, acao: botao.dataset.tipo, dias: Number(botao.dataset.dias) || undefined })
+      selecionado = null
+      await atualizar()
+    } catch {
+      avisarNoBotao(botao, 'Falhou')
+    }
+  }
   if (acao === 'dispensar') {
     const x = estado?.espera.find(item => chave(item) === selecionado) ?? estado?.trabalho.find(item => chave(item) === selecionado)
+      ?? estado?.terminados?.find(item => chave(item) === selecionado)
     if (!x) return
     try {
       await pedir('/api/dispensar', { sessao: x.sessao, desde: x.desde })

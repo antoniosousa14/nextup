@@ -15,10 +15,12 @@ import { criarContinuidade } from './lib/continuidade.mjs'
 import * as marcasDosProjetos from './lib/marcas.mjs'
 import { criarHistorico } from './lib/historico.mjs'
 import { locaisParaDetalhe, montarProjetos, resumirRitmo } from './lib/projetos.mjs'
+import { aplicarLembrete, lerLembretes } from './lib/lembretes.mjs'
+import { anexarPontos, escreverPedidos, lerPontos, pedidoDoDia } from './lib/pontoIA.mjs'
 import { atividadeDosChats } from './lib/ritmo.mjs'
 import { lerSituacoes, situacaoPorLocal } from './lib/situacao.mjs'
 import { analisarPonta } from './lib/ponta.mjs'
-import { meiaNoiteLocal, montarEstado, trabalhoMorto } from './lib/estado.mjs'
+import { itemMorto, meiaNoiteLocal, montarEstado } from './lib/estado.mjs'
 import { dispensar, lerFila, lerJson } from './lib/fila.mjs'
 import { grupoValido, lerGruposDaApp } from './lib/grupos.mjs'
 import * as msg from './lib/mensagens.mjs'
@@ -136,7 +138,7 @@ export async function criarServidor({ pastas = pastasPorOmissao(), portaInicial 
 
   async function estado() {
     const agora = Date.now()
-    const [sessoes, fila, barra, foco, orquestrador, organizacao, app, consumo, mensagens] = await Promise.all([
+    const [sessoes, fila, barra, foco, orquestrador, organizacao, app, consumo, mensagens, lembretes] = await Promise.all([
       lerSessoes(pastas.sessoes, cache),
       lerFila(pastas.itens, agora),
       lerJson(pastas.barra),
@@ -146,7 +148,9 @@ export async function criarServidor({ pastas = pastasPorOmissao(), portaInicial 
       lerGruposDaApp(pastas.configApp, cacheGrupos),
       lerConsumo(pastas.consumo, agora, cacheConsumo),
       msg.lerMensagens(pastas.saida, agora),
+      lerLembretes(pastas.lembretes),
     ])
+    const dia = await lerJson(join(pastas.projetosIA, 'dia.json'))
 
     // A pílula lê o barra.json sem saber de arquivados: dispensa-se lá, pelo ficheiro de dispensas que ela
     // já respeita, o chat à espera que entretanto foi arquivado.
@@ -158,11 +162,14 @@ export async function criarServidor({ pastas = pastasPorOmissao(), portaInicial 
       await dispensar(pastas.itens, chip.sessao, chip.desde).catch(() => {})
     }
 
-    // O mesmo para um «a trabalhar» que ficou preso porque o chat fez /clear a meio do turno: a pílula e o
-    // mod só deixam de o contar com este ficheiro (o barra.json só é reescrito no próximo turno de algum chat).
+    // O mesmo para os chats onde fizeste /clear (à espera ou a trabalhar): a pílula e o mod só deixam de os
+    // contar com este ficheiro (o barra.json só é reescrito no próximo turno de algum chat). Corre também de
+    // 20 em 20 s com a janela fechada (vigia dos projetos), por isso a pílula limpa-se sozinha.
     const sessaoDe = new Map(sessoes.map(s => [s.local, s]))
-    for (const t of barra?.trabalho ?? []) {
-      if (!t?.local || fila.dispensados[t.sessao] === t.desde || !trabalhoMorto(sessaoDe.get(t.local), t)) continue
+    const doFoco = fila.itens?.find(i => i.sessao === foco?.sessao)
+    const vivos = [...(barra?.modelo?.chips ?? []), ...(barra?.modelo?.extra ?? []), ...(barra?.trabalho ?? []), ...(doFoco ? [doFoco] : [])]
+    for (const t of vivos) {
+      if (!t?.local || fila.dispensados[t.sessao] === t.desde || !itemMorto(sessaoDe.get(t.local), t)) continue
       if (!uuidValido(t.sessao) || !Number.isFinite(t.desde)) continue
       fila.dispensados[t.sessao] = t.desde
       await dispensar(pastas.itens, t.sessao, t.desde).catch(() => {})
@@ -172,8 +179,9 @@ export async function criarServidor({ pastas = pastasPorOmissao(), portaInicial 
 
     return {
       // `foco`: o mod esconde da barra o chat onde escreveste por último; aqui conta como qualquer outro.
-      ...montarEstado({ sessoes, ...fila, barra, agora, meiaNoite: meiaNoiteLocal(agora), organizacao, grupos: app.grupos, atribuicoes: app.atribuicoes, erroGrupos: app.erro, foco: uuidValido(foco?.sessao) ? foco.sessao : undefined, orquestrador: localOrquestrador }),
+      ...montarEstado({ sessoes, ...fila, barra, agora, meiaNoite: meiaNoiteLocal(agora), organizacao, grupos: app.grupos, atribuicoes: app.atribuicoes, erroGrupos: app.erro, foco: uuidValido(foco?.sessao) ? foco.sessao : undefined, orquestrador: localOrquestrador, lembretes }),
       orquestrador: localOrquestrador,
+      dia: typeof dia?.ponto === 'string' ? { ponto: dia.ponto, primeiro: dia.tuaVez ?? '', em: dia.em ?? 0 } : null,
       consumo: resumirConsumo(consumo, agora),
       mensagens,
     }
@@ -185,6 +193,8 @@ export async function criarServidor({ pastas = pastasPorOmissao(), portaInicial 
   const continuidade = criarContinuidade({ base: pastas.projetos })
   const cacheSituacoes = new Map()
   let projetosGuardados = null
+  // O último pedido escrito por projeto (id → hash), para não reescrever o mesmo pedido.
+  const pedidosIA = new Map()
 
   async function verProjetos() {
     const agora = Date.now()
@@ -204,6 +214,12 @@ export async function criarServidor({ pastas = pastasPorOmissao(), portaInicial 
     const localDe = new Map(sessoes.filter(s => !s.arquivado).flatMap(s => (s.clis ?? []).map(c => [c, s.local])))
     const atividade = historico.pronto() ? atividadeDosChats(historico.estados(), localDe, agora) : new Map()
     const projetos = montarProjetos(e, detalhes, { situacoes: situacaoPorLocal(situacoes, sessoes), atividade, marcas, agora })
+    // O ponto de situação da IA: o que já há, e um pedido novo para cada projeto que mudou.
+    const pontos = await lerPontos(pastas.projetosIA)
+    const novos = anexarPontos(projetos, pontos, pedidosIA)
+    // E o resumo do dia (topo do painel), com o estado e os projetos já com o texto da IA.
+    novos.push(...pedidoDoDia(e, projetos, pontos, pedidosIA))
+    await escreverPedidos(pastas.projetosIA, novos, pedidosIA, agora).catch(() => {})
     const dados = { geradoEm: agora, resumo: resumirRitmo(projetos), projetos }
     projetosGuardados = { em: agora, dados }
 
@@ -404,6 +420,31 @@ export async function criarServidor({ pastas = pastasPorOmissao(), portaInicial 
     '/api/mensagens/preparar': { metodo: 'POST', fazer: prepararMensagem },
     '/api/mensagens/enviar': { metodo: 'POST', fazer: enviarMensagem },
     '/api/novo-chat': { metodo: 'POST', fazer: novoChat },
+    // «Já está feito» num chat à espera: sai da espera e da pílula (dispensa) e, se o chat é de um projeto,
+    // fica no feito desse projeto, para a IA reescrever o ponto de situação.
+    '/api/ja-feito': {
+      metodo: 'POST',
+      fazer: async ({ sessao, desde, local, texto } = {}) => {
+        if (!uuidValido(sessao) || !Number.isFinite(desde) || (local && !localValido(local))) return [400, { erro: 'pedido inválido' }]
+        await dispensar(pastas.itens, sessao, desde)
+        const e = await estado()
+        const grupo = e.recentes.find(c => c.local === local)?.grupo
+        if (grupo && grupo !== 'sem-grupo' && typeof texto === 'string' && texto.trim()) {
+          await emSerie(() => marcarProjeto({ acao: 'feito-linha', grupo, texto, local, em: Date.now() }))
+        }
+        projetosGuardados = null
+
+        return { ok: true }
+      },
+    },
+    '/api/lembrete': {
+      metodo: 'POST',
+      fazer: async pedido => {
+        const r = await aplicarLembrete(pastas.lembretes, pedido ?? {}, Date.now())
+
+        return r
+      },
+    },
     '/api/dispensar': {
       metodo: 'POST',
       fazer: async ({ sessao, desde }) => {
@@ -477,6 +518,10 @@ export async function criarServidor({ pastas = pastasPorOmissao(), portaInicial 
   const primeiraLeitura = atualizarHistorico().catch(registarErro)
   const leitura = setInterval(() => atualizarHistorico().catch(registarErro), historicoMs)
   leitura.unref()
+  // Em tempo real, mesmo com a janela fechada: de 20 em 20 s vê se algum projeto mudou e pede à IA o ponto
+  // de situação novo (o mod de um chat aberto responde).
+  const vigiaProjetos = setInterval(() => verProjetos().catch(registarErro), 20_000)
+  vigiaProjetos.unref()
 
   return {
     porta,
@@ -485,6 +530,7 @@ export async function criarServidor({ pastas = pastasPorOmissao(), portaInicial 
     fechar: () => new Promise(resolver => {
       clearInterval(limpeza)
       clearInterval(leitura)
+      clearInterval(vigiaProjetos)
       servidor.closeAllConnections()
       servidor.close(() => resolver())
     }),

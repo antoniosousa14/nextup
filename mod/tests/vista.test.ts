@@ -76,3 +76,20 @@ test('itens com mais de 7 dias são ignorados', () => {
 test('guarda o instante em que foi calculada', () => {
   expect(montarVista({ itens: [], dispensados: {}, propria: 'eu', agora }).calculadaEm).toBe(agora)
 })
+
+test('o que acabou sem precisar de ti não entra na fila', () => {
+  const terminou = item('fim', 'a-espera', agora)
+  terminou.classificacao = { ...classe(4), precisaDeTi: false }
+  const v = montarVista({ itens: [terminou, item('outro', 'a-espera', agora, 3)], dispensados: {}, propria: '', agora })
+  expect(v.fila.map(l => l.sessao).join()).toBe('outro')
+})
+
+test('parado a meio do turno à tua espera entra na fila à frente e sai do «a trabalhar»', () => {
+  const p = item('parado', 'a-trabalhar', agora - H)
+  p.classificacao = { ...classe(1), precisaDeTi: false }
+  p.progresso = { passos: [], ferramentas: 3, bloqueio: { texto: 'Responder: que cor?', desde: agora } }
+  const v = montarVista({ itens: [p, item('outro', 'a-espera', agora, 4)], dispensados: {}, propria: '', agora })
+  expect(v.fila.map(l => l.sessao).join()).toBe('parado,outro')
+  expect(v.fila[0]?.classificacao?.cartao.precisa).toBe('Responder: que cor?')
+  expect(v.aTrabalhar).toBe(0)
+})

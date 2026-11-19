@@ -423,3 +423,20 @@ test('locaisParaDetalhe: só os chats mais recentes de cada projeto', () => {
   assert.ok(locais.has('a') && locais.has('b') && locais.has('c'))
   assert.equal(locais.has('d'), false, 'chats sem grupo não têm projeto')
 })
+
+test('marcas: «já está feito» tira a linha do que falta, põe-na no feito como tua e o chat deixa de pedir', async () => {
+  const { aplicarAcao, vazias } = await import('../lib/marcas.mjs')
+  const e = estadoComEsquecido()
+  e.recentes.find(c => c.local === 'x').precisa = 'Entregar o relatório'
+  const r = aplicarAcao(vazias(), { acao: 'feito-linha', grupo: G, texto: 'Entregar  o relatório', local: 'x', em: agora })
+  assert.equal(r.erro, undefined)
+  const fac = projetoDe(montarProjetos(e, new Map(), { situacoes: faltaX, marcas: r.marcas }), G)
+  assert.deepEqual(fac.porFazer.map(i => i.texto), ['Rever as notas'])
+  assert.equal(fac.tuaVez, 0)
+  assert.equal(fac.feito[0].origem, 'pessoa')
+  assert.equal(fac.feito[0].texto, 'Entregar o relatório')
+  assert.equal(fac.principal.precisa, '')
+  // Marcar outra vez a mesma linha não a duplica; linha vazia é recusada.
+  assert.equal(aplicarAcao(r.marcas, { acao: 'feito-linha', grupo: G, texto: 'entregar o relatório', em: agora }).marcas.feitos[G].length, 1)
+  assert.ok(aplicarAcao(vazias(), { acao: 'feito-linha', grupo: G, texto: '  ' }).erro)
+})

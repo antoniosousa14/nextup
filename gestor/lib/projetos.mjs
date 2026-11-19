@@ -49,8 +49,10 @@ export function pontosDe({ prioridade, tuaVez = false, emCurso = false, diasPara
   return prioridade * 10 + (tuaVez ? 12 : 0) - (emCurso ? 5 : 0) + Math.min(Math.max(diasParado, 0), 8)
 }
 
-function resumirChat(estado, chat, detalhe) {
-  const espera = estado.espera.find(x => x.local === chat.local)
+function resumirChat(estado, chat, detalhe, resolvidoEm = 0) {
+  // «Já está feito» depois da última mensagem do chat: o que ele pedia à pessoa já não conta.
+  const resolvido = resolvidoEm >= hora(chat.mensagemEm) && resolvidoEm > 0
+  const espera = resolvido ? undefined : estado.espera.find(x => x.local === chat.local)
   const trabalho = estado.trabalho.find(x => x.local === chat.local)
   const estadoChat = trabalho ? 'trabalho' : espera ? 'espera' : 'parado'
   // O plano do chat a trabalhar vem dos passos do mod; senão da última lista de tarefas da transcrição.
@@ -62,7 +64,7 @@ function resumirChat(estado, chat, detalhe) {
     estado: estadoChat,
     mensagemEm: hora(chat.mensagemEm),
     // O que o chat precisa de ti: o cartão da IA (se está à espera), senão o resumo que a app guarda.
-    precisa: espera?.precisa || (trabalho ? '' : chat.precisa) || '',
+    precisa: resolvido ? '' : espera?.precisa || (trabalho ? '' : chat.precisa) || '',
     rotulo: espera?.rotulo ?? '',
     pedi: detalhe?.pedi || espera?.pediste || '',
     respondeu: detalhe?.respondeu || espera?.fez || chat.resumo || '',
@@ -142,19 +144,27 @@ export function montarProjetos(estado, detalhes = new Map(), { situacoes = new M
   for (const grupo of gruposDe(estado.arvore ?? [])) {
     const chats = chatsDoGrupo(estado, grupo)
     if (!chats.length) continue
-    const resumidos = chats.map(c => resumirChat(estado, c, detalhes.get(c.local)))
+    // O que a pessoa marcou como «já está feito» neste projeto.
+    const feitosPessoa = marcas.feitos?.[grupo.id] ?? []
+    const resolvidoEm = local => Math.max(0, ...feitosPessoa.filter(f => f.local === local).map(f => f.em))
+    const resumidos = chats.map(c => resumirChat(estado, c, detalhes.get(c.local), resolvidoEm(c.local)))
     const esperaDe = new Map(estado.espera.map(x => [x.local, x]))
     // As linhas que a pessoa escondeu deste projeto (por já não valerem) não voltam a aparecer.
     const marca = marcas.grupos?.[grupo.id] ?? {}
-    const escondidas = new Set((marcas.itens?.[grupo.id] ?? []).map(i => i.chave))
+    const escondidas = new Set([...(marcas.itens?.[grupo.id] ?? []), ...feitosPessoa].map(i => i.chave))
     const visivel = i => !escondidas.has(chaveDe(i.texto))
     const porFazer = resumidos
       .flatMap(r => faltasDoChat(agora, r, situacoes.get(r.local)))
       .filter(visivel)
       .sort((a, b) => b.pontos - a.pontos || b.desde - a.desde)
-    let feito = semRepetidos(resumidos
+    const porTi = feitosPessoa.map(f => {
+      const c = resumidos.find(r => r.local === f.local) ?? resumidos[0]
+
+      return { texto: f.texto, em: f.em, chat: { local: c.local, titulo: c.titulo }, origem: 'pessoa' }
+    })
+    let feito = semRepetidos([...porTi, ...resumidos
       .flatMap(r => feitosDoChat(r, situacoes.get(r.local), esperaDe.get(r.local)))
-      .filter(visivel)
+      .filter(visivel)]
       .sort((a, b) => b.em - a.em))
     if (!feito.length) feito = resumoComoFeito(resumidos[0]).filter(visivel)
     const ultimaEm = resumidos[0].mensagemEm
@@ -179,7 +189,7 @@ export function montarProjetos(estado, detalhes = new Map(), { situacoes = new M
       esquecido,
       semImportancia,
       dispensado,
-      linhasEscondidas: escondidas.size,
+      linhasEscondidas: (marcas.itens?.[grupo.id] ?? []).length,
       atencao,
       atividade: somarAtividade(chats.map(c => atividade.get(c.local)), DIAS_RITMO),
       tuaVez: porFazer.filter(i => i.tuaVez).length,

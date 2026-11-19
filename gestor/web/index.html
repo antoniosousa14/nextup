@@ -23,6 +23,7 @@
     <nav class="nav">
       <button class="it on" type="button" data-ir="topo" id="ir-painel"><span class="glifo">▤</span>Painel</button>
       <button class="it" type="button" data-ir="sec-espera"><span class="sinal-pt" style="margin:0 4px"></span>À tua espera<span class="n sinal" id="n-espera">00</span></button>
+      <button class="it" type="button" data-ir="sec-terminou"><span class="glifo">✓</span>Terminou<span class="n" id="n-terminou">00</span></button>
       <button class="it" type="button" data-ir="sec-trabalho"><span class="glifo">◌</span>A trabalhar<span class="n" id="n-trabalho">00</span></button>
       <button class="it" type="button" data-ir="sec-recentes"><span class="glifo">↺</span>Recentes<span class="n" id="n-recentes">00</span></button>
       <button class="it" type="button" data-vista="consumo" id="ir-consumo"><span class="glifo">$</span>Consumo<span class="n" id="n-consumo">—</span></button>
@@ -46,14 +47,20 @@
       <div class="faixa" id="faixa"></div>
       <button class="linha-consumo" type="button" id="linha-consumo" data-vista="consumo" title="Abrir a aba Consumo"></button>
 
+      <section class="sec dia" id="sec-dia" hidden></section>
+
       <section class="sec" id="sec-espera">
-        <div class="sec-cab"><h2>À tua espera</h2><span class="rot">ordem da IA · importância, espera, desbloqueio</span></div>
-        <div class="cab-quadro"><span class="rot">Nº</span><span class="rot">Chat</span><span class="rot">Precisa de ti</span><span class="rot">Imp.</span><span class="rot">Espera</span></div>
+        <div class="sec-cab"><h2>À tua espera</h2><span class="conta" id="r-espera">00</span><span class="rot">o mais importante primeiro</span></div>
         <div class="quadro" id="espera"></div>
       </section>
 
+      <section class="sec" id="sec-terminou">
+        <div class="sec-cab"><h2>Terminou</h2><span class="conta" id="r-terminou">00</span><span class="rot">acabou sem precisar de ti · o que fez e o que falta</span></div>
+        <div class="quadro" id="terminou"></div>
+      </section>
+
       <section class="sec" id="sec-trabalho">
-        <div class="sec-cab"><h2>A trabalhar</h2><span class="rot" id="r-trabalho">00</span></div>
+        <div class="sec-cab"><h2>A trabalhar</h2><span class="conta" id="r-trabalho">00</span></div>
         <div class="quadro" id="trabalho"></div>
       </section>
 

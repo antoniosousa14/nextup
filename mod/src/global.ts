@@ -33,6 +33,11 @@ export function trabalhoGlobal(itens: Item[], agora: number, dispensados: Record
         atual,
         ferramentas: item.progresso?.ferramentas ?? 0,
         ultima: item.progresso?.ultima,
+        tituloIA: item.progresso?.resumo?.titulo ?? item.tituloIA,
+        agora: item.progresso?.resumo?.agora,
+        precisa: item.progresso?.resumo?.precisa,
+        resumoEm: item.progresso?.resumo?.em,
+        bloqueio: item.progresso?.bloqueio,
       }
     })
 }

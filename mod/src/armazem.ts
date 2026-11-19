@@ -3,7 +3,16 @@ import type { EngineInterface, FsEntry } from 'claude-code'
 import type { Foco, Item, Situacao } from '../types'
 import { VALIDADE_MS } from './janela'
 
-export type Caminhos = { raiz: string; itens: string; foco: string; consumo: string; saida: string; situacao: string }
+export type Caminhos = {
+  raiz: string
+  itens: string
+  foco: string
+  consumo: string
+  saida: string
+  situacao: string
+  lembretes: string
+  projetosIA: string
+}
 
 const SUFIXO_DISPENSA = '.dispensado.json'
 
@@ -11,11 +20,20 @@ export async function caminhos($: EngineInterface): Promise<Caminhos> {
   const casa = (await $.env.get('USERPROFILE')) ?? ''
   const raiz = `${casa}/.claude/nextup`
 
-  return { raiz, itens: `${raiz}/itens`, foco: `${raiz}/foco.json`, consumo: `${raiz}/consumo`, saida: `${raiz}/saida`, situacao: `${raiz}/situacao` }
+  return {
+    raiz,
+    itens: `${raiz}/itens`,
+    foco: `${raiz}/foco.json`,
+    consumo: `${raiz}/consumo`,
+    saida: `${raiz}/saida`,
+    situacao: `${raiz}/situacao`,
+    lembretes: `${raiz}/lembretes`,
+    projetosIA: `${raiz}/projetos-ia`,
+  }
 }
 
 export async function garantirPastas($: EngineInterface, c: Caminhos): Promise<void> {
-  const pastas = [c.itens, c.consumo, c.saida, c.situacao]
+  const pastas = [c.itens, c.consumo, c.saida, c.situacao, c.lembretes, c.projetosIA]
   const faltam: string[] = []
   for (const p of pastas) if (!(await $.fs.exists(p))) faltam.push(p)
   if (!faltam.length) return
@@ -27,7 +45,7 @@ export async function garantirPastas($: EngineInterface, c: Caminhos): Promise<v
   ])
 }
 
-async function lerJson<T>($: EngineInterface, caminho: string): Promise<T | undefined> {
+export async function lerJson<T>($: EngineInterface, caminho: string): Promise<T | undefined> {
   try {
     return JSON.parse(await $.fs.read(caminho)) as T
   } catch {

@@ -656,7 +656,7 @@ namespace NextUp
             }
             else
             {
-                quadro.Children.Add(Rotulo("À espera de ti"));
+                quadro.Children.Add(Rotulo("À tua espera"));
                 int indice = 0;
                 foreach (var chip in chips.Take(MAX_LINHAS))
                 {

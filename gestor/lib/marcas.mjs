@@ -7,14 +7,16 @@ import { grupoValido } from './grupos.mjs'
 // dispensa dos chats à espera:
 //  - dispensar: o projeto sai da vista até haver novidades (uma mensagem nova em qualquer chat dele);
 //  - sem importância: fica à vista, mas por último e sem alertas de «esquecido»;
-//  - esconder uma linha do que falta ou do que ficou feito (por já não valer, por exemplo).
+//  - esconder uma linha do que falta ou do que ficou feito (por já não valer, por exemplo);
+//  - «já está feito»: algo que a IA dizia que dependia da pessoa e que ela já fez. A linha sai do que falta,
+//    entra no feito («feito por ti») e, se veio de um chat, esse chat deixa de contar como à espera dela.
 // Ficam em projetos-marcas.json; só o servidor do gestor o escreve, um pedido de cada vez.
 
 export const MAX_GRUPOS = 300
 export const MAX_LINHAS = 40
 const MAX_TEXTO = 160
 
-export const vazias = () => ({ versao: 1, grupos: {}, itens: {} })
+export const vazias = () => ({ versao: 1, grupos: {}, itens: {}, feitos: {} })
 
 // A chave de uma linha de texto: igual aos espaços e maiúsculas, para a mesma linha dar a mesma marca.
 export const chaveDe = t => String(t ?? '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, MAX_TEXTO)
@@ -38,6 +40,20 @@ export function limpar(bruto) {
     if (itens.length) marcas.itens[id] = itens
   }
 
+  for (const [id, lista] of Object.entries(bruto?.feitos ?? {})) {
+    if (!grupoValido(id) || !Array.isArray(lista)) continue
+    const feitos = lista
+      .map(i => ({
+        chave: chaveDe(i?.chave ?? i?.texto),
+        texto: String(i?.texto ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXTO),
+        em: Number.isFinite(i?.em) ? i.em : 0,
+        ...(typeof i?.local === 'string' && i.local ? { local: i.local } : {}),
+      }))
+      .filter(i => i.chave)
+      .slice(-MAX_LINHAS)
+    if (feitos.length) marcas.feitos[id] = feitos
+  }
+
   return marcas
 }
 
@@ -57,7 +73,7 @@ export async function gravarMarcas(caminho, marcas) {
   await rename(temp, caminho)
 }
 
-const ACOES = ['dispensar', 'repor', 'sem-importancia', 'com-importancia', 'esconder-linha', 'repor-linhas']
+const ACOES = ['dispensar', 'repor', 'sem-importancia', 'com-importancia', 'esconder-linha', 'repor-linhas', 'feito-linha']
 
 // Aplica um pedido às marcas (sem as mudar): { marcas } ou { erro }.
 export function aplicarAcao(antes, pedido) {
@@ -86,6 +102,13 @@ export function aplicarAcao(antes, pedido) {
     marcas.itens[id] = lista
   } else if (pedido.acao === 'repor-linhas') {
     delete marcas.itens[id]
+  } else if (pedido.acao === 'feito-linha') {
+    const chave = chaveDe(pedido.texto)
+    if (!chave) return { erro: 'linha vazia' }
+    const em = Number.isFinite(pedido.em) ? pedido.em : Date.now()
+    const lista = (marcas.feitos[id] ?? []).filter(i => i.chave !== chave)
+    lista.push({ chave, texto: String(pedido.texto).replace(/\s+/g, ' ').trim().slice(0, MAX_TEXTO), em, ...(typeof pedido.local === 'string' && pedido.local ? { local: pedido.local } : {}) })
+    marcas.feitos[id] = lista.slice(-MAX_LINHAS)
   }
   if (Object.keys(marca).length) marcas.grupos[id] = marca
   else delete marcas.grupos[id]
